@@ -66,7 +66,7 @@ class ActorCritic(nn.Module):
 
         # Proprioceptive state processing network (MLP)
         self.proprio_mlp = nn.Sequential(
-            nn.Linear(34, 128),  # Proprio state size for Panda is 34
+            nn.Linear(50, 128),  # Proprio state size for Panda is 50
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
@@ -92,7 +92,7 @@ class ActorCritic(nn.Module):
 
         # Permute image dimensions to be (batch, channel, height, width)
         img = img.permute(0, 3, 1, 2)
-        depth = depth.unsqueeze(1)  # Add a channel dimension for depth
+        depth = depth.permute(0, 3, 1, 2)
 
         img_features = self.image_conv(img)
         depth_features = self.depth_conv(depth)
