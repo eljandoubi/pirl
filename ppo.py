@@ -1,121 +1,8 @@
-import gc
-import os
-from pathlib import Path
-
-# Logging and plotting
-import matplotlib.pyplot as plt
-import robosuite as suite
 import torch
 import torch.nn as nn
 from torch.distributions import MultivariateNormal
-from tqdm import trange
 
-os.environ["MUJOCO_GL"] = "egl"
-
-# --- 1. Environment Setup ---
-# Function to create the robosuite environment
-def make_env(device_id=-1, img_size=64):
-    env = suite.make(
-        "Lift",
-        robots="Panda",
-        use_camera_obs=True,
-        has_renderer=False,  # Set to True to visualize
-        has_offscreen_renderer=True,
-        camera_names="agentview",
-        camera_heights=img_size,
-        camera_widths=img_size,
-        camera_depths=True,
-        reward_shaping=True,
-        control_freq=20,
-        horizon=200,
-        render_gpu_device_id=device_id,
-    )
-    return env
-
-
-# --- 2. Multi-Modal Actor-Critic Network ---
-class ActorCritic(nn.Module):
-    def __init__(self, action_dim, img_size=64):
-        super(ActorCritic, self).__init__()
-
-        # Image processing network (CNN) for RGB
-        self.image_conv = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
-
-        # Depth processing network (CNN) for Depth
-        self.depth_conv = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
-
-        # Calculate the size of the flattened CNN outputs
-        # A dummy forward pass helps in determining the flat feature size
-        with torch.no_grad():
-            dummy_img = torch.zeros(1, 3, img_size, img_size)
-            dummy_depth = torch.zeros(1, 1, img_size, img_size)
-            img_feature_size = self.image_conv(dummy_img).shape[1]
-            depth_feature_size = self.depth_conv(dummy_depth).shape[1]
-
-        # Proprioceptive state processing network (MLP)
-        self.proprio_mlp = nn.Sequential(
-            nn.Linear(50, 128),  # Proprio state size for Panda is 50
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-        )
-
-        # Fusion layer
-        fused_size = img_feature_size + depth_feature_size + 64
-        self.fusion_layer = nn.Sequential(nn.Linear(fused_size, 512), nn.ReLU())
-
-        # Actor head
-        self.actor = nn.Sequential(
-            nn.Linear(512, action_dim),
-            nn.Tanh(),  # To scale actions to [-1, 1]
-        )
-
-        # Critic head
-        self.critic = nn.Linear(512, 1)
-
-    def forward(self, obs):
-        img = obs["agentview_image"] / 255.0  # Normalize pixel values
-        depth = obs["agentview_depth"]
-        depth = torch.nan_to_num(depth, nan=1.0, posinf=1.0, neginf=0.0)
-        depth = torch.clamp(depth, 0.0, 1.0)
-        depth = depth / (depth.max() + 1e-8)
-        proprio = obs["robot0_proprio-state"]
-        proprio = (proprio - proprio.mean(dim=1, keepdim=True)) / (proprio.std(dim=1, keepdim=True) + 1e-8)
-
-        # Permute image dimensions to be (batch, channel, height, width)
-        img = img.permute(0, 3, 1, 2)
-        depth = depth.permute(0, 3, 1, 2)
-
-        img_features = self.image_conv(img)
-        depth_features = self.depth_conv(depth)
-        proprio_features = self.proprio_mlp(proprio)
-
-        # Concatenate features
-        fused_features = torch.cat(
-            (img_features, depth_features, proprio_features), dim=1
-        )
-        fused_output = self.fusion_layer(fused_features)
-
-        action_mean = self.actor(fused_output)
-        state_value = self.critic(fused_output)
-
-        return action_mean, state_value
+from model import ActorCritic
 
 
 # --- 3. PPO Agent ---
@@ -275,8 +162,7 @@ class PPO:
 
 
 class Memory:
-    def __init__(self, device=None):
-        self.device = device
+    def __init__(self):
         self.actions = []
         self.states = []
         self.logprobs = []
@@ -284,16 +170,13 @@ class Memory:
         self.is_terminals = []
 
     def append(self, action, state, logprob, reward, is_terminal):
-        # Move action and logprob to device if not already
-        if isinstance(action, torch.Tensor):
-            action = action.to(self.device)
-        if isinstance(logprob, torch.Tensor):
-            logprob = logprob.to(self.device)
-        # Move state arrays to device as tensors
+
+        action = torch.as_tensor(action, dtype=torch.float32)
         state_on_device = {
-            k: torch.as_tensor(v, dtype=torch.float32, device=self.device)
+            k: torch.as_tensor(v, dtype=torch.float32)
             for k, v in state.items()
         }
+
         self.actions.append(action)
         self.states.append(state_on_device)
         self.logprobs.append(logprob)
@@ -308,123 +191,3 @@ class Memory:
         del self.is_terminals[:]
 
 
-def main():
-
-    ############## Hyperparameters ##############
-    env_name = "robosuite_lift"
-    max_ep_len = 200  # max timesteps in one episode
-    max_training_timesteps = (
-        1000000  # break training loop if timeteps > max_training_timesteps
-    )
-
-    K_epochs = 10
-    update_timestep = 4000
-    eps_clip = 0.2  # clip parameter for PPO
-    gamma = 0.99  # discount factor
-
-    lr_actor = 1e-4
-    lr_critic = 3e-4
-
-    img_size = 64  # Image size for CNN input
-
-    # --- Checkpointing ---
-    save_model_freq = int(2e4)  # Save model every n timesteps
-    checkpoint_dir = "./ppo_checkpoints"
-    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
-
-    # To resume training, set `load_checkpoint_path` to the model file
-    # e.g., load_checkpoint_path = "./ppo_checkpoints/PPO_robosuite_lift_20000.pth"
-    load_checkpoint_path = None
-    #############################################
-
-    # Logging
-    log_dir = "./ppo_logs"
-    os.makedirs(log_dir, exist_ok=True)
-    reward_log_path = os.path.join(log_dir, "rewards.txt")
-    loss_log_path = os.path.join(log_dir, "losses.txt")
-    reward_history = []
-
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    env = make_env(device_id=device.index if torch.cuda.is_available() else -1,
-                   img_size=img_size)
-    action_dim = env.action_spec[0].shape[0]
-    memory = Memory(device=device)
-    ppo_agent = PPO(action_dim, img_size, lr_actor, lr_critic, 
-                    gamma, K_epochs, eps_clip, device)
-
-    if load_checkpoint_path:
-        ppo_agent.load(load_checkpoint_path)
-
-    time_step = 0
-    i_episode = 0
-
-    num_episodes = int(max_training_timesteps // max_ep_len)
-    with trange(num_episodes, desc="Episodes") as pbar:
-        for _ in range(num_episodes):
-            state = env.reset()
-            torch.cuda.synchronize()
-            current_ep_reward = 0
-
-            for t in range(1, max_ep_len + 1):
-                # select action with policy
-                action, log_prob = ppo_agent.select_action(state)
-                state, reward, done, _ = env.step(action)
-
-                # saving reward and is_terminals
-                memory.append(torch.from_numpy(action), state, log_prob, reward, done)
-
-                time_step += 1
-                current_ep_reward += reward
-
-                # update PPO agent
-                if time_step % update_timestep == 0:
-                    ppo_agent.update(memory)
-                    memory.clear_memory()
-                    gc.collect()
-
-                # save model checkpoint
-                if time_step % save_model_freq == 0:
-                    checkpoint_path = f"{checkpoint_dir}/PPO_{env_name}_{time_step}.pth"
-                    ppo_agent.save(checkpoint_path)
-
-                if done:
-                    break
-
-            i_episode += 1
-            pbar.update(1)
-
-            # Logging reward
-            reward_history.append(current_ep_reward)
-            with open(reward_log_path, "a") as f:
-                f.write(f"{current_ep_reward}\n")
-
-            pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
-
-    env.close()
-
-    # Save losses to file
-    with open(loss_log_path, "w") as f:
-        for loss in ppo_agent.losses:
-            f.write(f"{loss}\n")
-
-    # Plotting
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(reward_history)
-    plt.title("Episode Reward")
-    plt.xlabel("Episode")
-    plt.ylabel("Reward")
-
-    plt.subplot(1, 2, 2)
-    plt.plot(ppo_agent.losses)
-    plt.title("PPO Loss (per update)")
-    plt.xlabel("Update Step")
-    plt.ylabel("Loss")
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(log_dir, "training_curves.png"))
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()
