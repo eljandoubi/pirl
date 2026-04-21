@@ -7,6 +7,7 @@ import robosuite as suite
 import torch
 import torch.nn as nn
 from torch.distributions import MultivariateNormal
+from tqdm import trange
 
 
 # --- 1. Environment Setup ---
@@ -86,7 +87,7 @@ class ActorCritic(nn.Module):
         self.critic = nn.Linear(512, 1)
 
     def forward(self, obs):
-        img = obs["agentview_image"]
+        img = obs["agentview_image"] / 255.0  # Normalize pixel valuesÒ
         depth = obs["agentview_depth"]
         proprio = obs["robot0_proprio-state"]
 
@@ -141,13 +142,17 @@ class PPO:
         with torch.no_grad():
             # Preprocess state for the network
             img = (
-                torch.tensor(state["agentview_image"]).to(self.device).unsqueeze(0)
+                torch.tensor(state["agentview_image"], dtype=torch.float32)
+                .to(self.device)
+                .unsqueeze(0)
             )
             depth = (
-                torch.tensor(state["agentview_depth"]).to(self.device).unsqueeze(0)
+                torch.tensor(state["agentview_depth"], dtype=torch.float32)
+                .to(self.device)
+                .unsqueeze(0)
             )
             proprio = (
-                torch.tensor(state["robot0_proprio-state"])
+                torch.tensor(state["robot0_proprio-state"], dtype=torch.float32)
                 .to(self.device)
                 .unsqueeze(0)
             )
@@ -184,15 +189,9 @@ class PPO:
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # convert list to tensor
-        old_states_img = torch.tensor(
-            [s["agentview_image"] for s in memory.states]
-        ).to(self.device)
-        old_states_depth = torch.tensor(
-            [s["agentview_depth"] for s in memory.states]
-        ).to(self.device)
-        old_states_proprio = torch.tensor(
-            [s["robot0_proprio-state"] for s in memory.states]
-        ).to(self.device)
+        old_states_img = torch.stack([s["agentview_image"] for s in memory.states]).to(self.device)
+        old_states_depth = torch.stack([s["agentview_depth"] for s in memory.states]).to(self.device)
+        old_states_proprio = torch.stack([s["robot0_proprio-state"] for s in memory.states]).to(self.device)
         old_actions = torch.squeeze(torch.stack(memory.actions, dim=0)).to(self.device)
         old_logprobs = torch.squeeze(torch.stack(memory.logprobs, dim=0)).to(
             self.device
@@ -228,7 +227,7 @@ class PPO:
             # final loss of clipped objective PPO
             loss = (
                 -torch.min(surr1, surr2)
-                + 0.5 * self.MseLoss(state_values, rewards)
+                + 0.5 * self.MseLoss(state_values, rewards.unsqueeze(1))
                 - 0.01 * dist_entropy
             )
 
@@ -349,46 +348,45 @@ def main():
     time_step = 0
     i_episode = 0
 
-    # training loop
-    while time_step <= max_training_timesteps:
-        state = env.reset()
-        current_ep_reward = 0
+    num_episodes = int(max_training_timesteps // max_ep_len)
+    with trange(num_episodes, desc="Episodes") as pbar:
+        for _ in range(num_episodes):
+            state = env.reset()
+            current_ep_reward = 0
 
-        for t in range(1, max_ep_len + 1):
-            # select action with policy
-            action, log_prob = ppo_agent.select_action(state)
-            state, reward, done, _ = env.step(action)
+            for t in range(1, max_ep_len + 1):
+                # select action with policy
+                action, log_prob = ppo_agent.select_action(state)
+                state, reward, done, _ = env.step(action)
 
-            # saving reward and is_terminals
+                # saving reward and is_terminals
+                memory.append(torch.from_numpy(action), state, log_prob, reward, done)
 
-            memory.append(torch.from_numpy(action), state, log_prob, reward, done)
+                time_step += 1
+                current_ep_reward += reward
 
-            time_step += 1
-            current_ep_reward += reward
+                # update PPO agent
+                if time_step % update_timestep == 0:
+                    ppo_agent.update(memory)
+                    memory.clear_memory()
 
-            # update PPO agent
-            if time_step % update_timestep == 0:
-                ppo_agent.update(memory)
-                memory.clear_memory()
+                # save model checkpoint
+                if time_step % save_model_freq == 0:
+                    checkpoint_path = f"{checkpoint_dir}/PPO_{env_name}_{time_step}.pth"
+                    ppo_agent.save(checkpoint_path)
 
-            # save model checkpoint
-            if time_step % save_model_freq == 0:
-                checkpoint_path = f"{checkpoint_dir}/PPO_{env_name}_{time_step}.pth"
-                ppo_agent.save(checkpoint_path)
+                if done:
+                    break
 
-            if done:
-                break
+            i_episode += 1
+            pbar.update(1)
 
-        i_episode += 1
+            # Logging reward
+            reward_history.append(current_ep_reward)
+            with open(reward_log_path, "a") as f:
+                f.write(f"{current_ep_reward}\n")
 
-        # Logging reward
-        reward_history.append(current_ep_reward)
-        with open(reward_log_path, "a") as f:
-            f.write(f"{current_ep_reward}\n")
-
-        print(
-            f"Episode {i_episode} \t Timestep: {time_step} \t Reward: {current_ep_reward}"
-        )
+            pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
 
     env.close()
 
