@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import robosuite as suite
 import torch
 import torch.nn as nn
-from robosuite.wrappers import GymWrapper
 from torch.distributions import MultivariateNormal
 
 
@@ -22,13 +21,10 @@ def make_env():
         camera_names="agentview",
         camera_heights=84,
         camera_widths=84,
+        camera_depths=True,
         reward_shaping=True,
         control_freq=20,
         horizon=200,
-    )
-    # The GymWrapper makes it compatible with standard RL interfaces
-    env = GymWrapper(
-        env, keys=["agentview_image", "agentview_depth", "robot0_proprio-state"]
     )
     return env
 
@@ -340,7 +336,7 @@ def main():
     reward_history = []
 
     env = make_env()
-    action_dim = env.action_space.shape[0]
+    action_dim = env.action_spec[0].shape[0]
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
