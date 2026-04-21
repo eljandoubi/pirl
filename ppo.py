@@ -1,3 +1,4 @@
+import gc
 import os
 from pathlib import Path
 
@@ -9,10 +10,11 @@ import torch.nn as nn
 from torch.distributions import MultivariateNormal
 from tqdm import trange
 
+os.environ["MUJOCO_GL"] = "egl"
 
 # --- 1. Environment Setup ---
 # Function to create the robosuite environment
-def make_env():
+def make_env(device_id=-1, img_size=64):
     env = suite.make(
         "Lift",
         robots="Panda",
@@ -20,19 +22,20 @@ def make_env():
         has_renderer=False,  # Set to True to visualize
         has_offscreen_renderer=True,
         camera_names="agentview",
-        camera_heights=84,
-        camera_widths=84,
+        camera_heights=img_size,
+        camera_widths=img_size,
         camera_depths=True,
         reward_shaping=True,
         control_freq=20,
         horizon=200,
+        render_gpu_device_id=device_id,
     )
     return env
 
 
 # --- 2. Multi-Modal Actor-Critic Network ---
 class ActorCritic(nn.Module):
-    def __init__(self, action_dim):
+    def __init__(self, action_dim, img_size=64):
         super(ActorCritic, self).__init__()
 
         # Image processing network (CNN) for RGB
@@ -60,8 +63,8 @@ class ActorCritic(nn.Module):
         # Calculate the size of the flattened CNN outputs
         # A dummy forward pass helps in determining the flat feature size
         with torch.no_grad():
-            dummy_img = torch.zeros(1, 3, 84, 84)
-            dummy_depth = torch.zeros(1, 1, 84, 84)
+            dummy_img = torch.zeros(1, 3, img_size, img_size)
+            dummy_depth = torch.zeros(1, 1, img_size, img_size)
             img_feature_size = self.image_conv(dummy_img).shape[1]
             depth_feature_size = self.depth_conv(dummy_depth).shape[1]
 
@@ -87,9 +90,13 @@ class ActorCritic(nn.Module):
         self.critic = nn.Linear(512, 1)
 
     def forward(self, obs):
-        img = obs["agentview_image"] / 255.0  # Normalize pixel valuesÒ
+        img = obs["agentview_image"] / 255.0  # Normalize pixel values
         depth = obs["agentview_depth"]
+        depth = torch.nan_to_num(depth, nan=1.0, posinf=1.0, neginf=0.0)
+        depth = torch.clamp(depth, 0.0, 1.0)
+        depth = depth / (depth.max() + 1e-8)
         proprio = obs["robot0_proprio-state"]
+        proprio = (proprio - proprio.mean(dim=1, keepdim=True)) / (proprio.std(dim=1, keepdim=True) + 1e-8)
 
         # Permute image dimensions to be (batch, channel, height, width)
         img = img.permute(0, 3, 1, 2)
@@ -114,14 +121,14 @@ class ActorCritic(nn.Module):
 # --- 3. PPO Agent ---
 class PPO:
     def __init__(
-        self, action_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, device
+        self, action_dim,img_size, lr_actor, lr_critic, gamma, K_epochs, eps_clip, device
     ):
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.device = device
 
-        self.policy = ActorCritic(action_dim).to(device)
+        self.policy = ActorCritic(action_dim, img_size).to(device)
         self.optimizer = torch.optim.Adam(
             [
                 {"params": self.policy.actor.parameters(), "lr": lr_actor},
@@ -129,7 +136,7 @@ class PPO:
             ]
         )
 
-        self.policy_old = ActorCritic(action_dim).to(device)
+        self.policy_old = ActorCritic(action_dim, img_size).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
@@ -143,17 +150,17 @@ class PPO:
             # Preprocess state for the network
             img = (
                 torch.tensor(state["agentview_image"], dtype=torch.float32)
-                .to(self.device)
+                .to(self.device, non_blocking=True)
                 .unsqueeze(0)
             )
             depth = (
                 torch.tensor(state["agentview_depth"], dtype=torch.float32)
-                .to(self.device)
+                .to(self.device, non_blocking=True)
                 .unsqueeze(0)
             )
             proprio = (
                 torch.tensor(state["robot0_proprio-state"], dtype=torch.float32)
-                .to(self.device)
+                .to(self.device, non_blocking=True)
                 .unsqueeze(0)
             )
 
@@ -185,16 +192,16 @@ class PPO:
             rewards.insert(0, discounted_reward)
 
         # Normalizing the rewards
-        rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device, non_blocking=True)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # convert list to tensor
-        old_states_img = torch.stack([s["agentview_image"] for s in memory.states]).to(self.device)
-        old_states_depth = torch.stack([s["agentview_depth"] for s in memory.states]).to(self.device)
-        old_states_proprio = torch.stack([s["robot0_proprio-state"] for s in memory.states]).to(self.device)
-        old_actions = torch.squeeze(torch.stack(memory.actions, dim=0)).to(self.device)
+        old_states_img = torch.stack([s["agentview_image"] for s in memory.states]).to(self.device, non_blocking=True)
+        old_states_depth = torch.stack([s["agentview_depth"] for s in memory.states]).to(self.device, non_blocking=True)
+        old_states_proprio = torch.stack([s["robot0_proprio-state"] for s in memory.states]).to(self.device, non_blocking=True)
+        old_actions = torch.squeeze(torch.stack(memory.actions, dim=0)).to(self.device, non_blocking=True)
         old_logprobs = torch.squeeze(torch.stack(memory.logprobs, dim=0)).to(
-            self.device
+            self.device, non_blocking=True
         )
 
         old_obs = {
@@ -234,6 +241,7 @@ class PPO:
             # take gradient step
             self.optimizer.zero_grad()
             loss.mean().backward()
+            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
             self.optimizer.step()
 
             epoch_losses.append(loss.mean().item())
@@ -309,13 +317,15 @@ def main():
         1000000  # break training loop if timeteps > max_training_timesteps
     )
 
-    update_timestep = max_ep_len * 4  # update policy every n timesteps
-    K_epochs = 80  # update policy for K epochs
+    K_epochs = 10
+    update_timestep = 4000
     eps_clip = 0.2  # clip parameter for PPO
     gamma = 0.99  # discount factor
 
-    lr_actor = 0.0003  # learning rate for actor
-    lr_critic = 0.001  # learning rate for critic
+    lr_actor = 1e-4
+    lr_critic = 3e-4
+
+    img_size = 64  # Image size for CNN input
 
     # --- Checkpointing ---
     save_model_freq = int(2e4)  # Save model every n timesteps
@@ -334,13 +344,13 @@ def main():
     loss_log_path = os.path.join(log_dir, "losses.txt")
     reward_history = []
 
-    env = make_env()
-    action_dim = env.action_spec[0].shape[0]
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+    env = make_env(device_id=device.index if torch.cuda.is_available() else -1,
+                   img_size=img_size)
+    action_dim = env.action_spec[0].shape[0]
     memory = Memory(device=device)
-    ppo_agent = PPO(action_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, device)
+    ppo_agent = PPO(action_dim, img_size, lr_actor, lr_critic, 
+                    gamma, K_epochs, eps_clip, device)
 
     if load_checkpoint_path:
         ppo_agent.load(load_checkpoint_path)
@@ -352,6 +362,7 @@ def main():
     with trange(num_episodes, desc="Episodes") as pbar:
         for _ in range(num_episodes):
             state = env.reset()
+            torch.cuda.synchronize()
             current_ep_reward = 0
 
             for t in range(1, max_ep_len + 1):
@@ -369,6 +380,7 @@ def main():
                 if time_step % update_timestep == 0:
                     ppo_agent.update(memory)
                     memory.clear_memory()
+                    gc.collect()
 
                 # save model checkpoint
                 if time_step % save_model_freq == 0:
