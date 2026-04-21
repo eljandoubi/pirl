@@ -141,13 +141,13 @@ class PPO:
         with torch.no_grad():
             # Preprocess state for the network
             img = (
-                torch.FloatTensor(state["agentview_image"]).to(self.device).unsqueeze(0)
+                torch.tensor(state["agentview_image"]).to(self.device).unsqueeze(0)
             )
             depth = (
-                torch.FloatTensor(state["agentview_depth"]).to(self.device).unsqueeze(0)
+                torch.tensor(state["agentview_depth"]).to(self.device).unsqueeze(0)
             )
             proprio = (
-                torch.FloatTensor(state["robot0_proprio-state"])
+                torch.tensor(state["robot0_proprio-state"])
                 .to(self.device)
                 .unsqueeze(0)
             )
@@ -184,13 +184,13 @@ class PPO:
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # convert list to tensor
-        old_states_img = torch.FloatTensor(
+        old_states_img = torch.tensor(
             [s["agentview_image"] for s in memory.states]
         ).to(self.device)
-        old_states_depth = torch.FloatTensor(
+        old_states_depth = torch.tensor(
             [s["agentview_depth"] for s in memory.states]
         ).to(self.device)
-        old_states_proprio = torch.FloatTensor(
+        old_states_proprio = torch.tensor(
             [s["robot0_proprio-state"] for s in memory.states]
         ).to(self.device)
         old_actions = torch.squeeze(torch.stack(memory.actions, dim=0)).to(self.device)
