@@ -4,6 +4,8 @@ from pathlib import Path
 
 os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
 # Logging and plotting
+from dataclasses import dataclass
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -14,66 +16,69 @@ from ppo import PPO, Memory
 from robotenv import VecEnv, make_env
 
 
+@dataclass
+class TrainingConfig:
+    env_name: str = "robosuite_lift"
+    max_ep_len: int = 200  # max timesteps in one episode
+    max_training_timesteps: int = 1000000  # break training loop if timeteps > max_training_timesteps
+
+    K_epochs: int = 10
+    update_timestep: int = 4000
+    eps_clip: float = 0.2  # clip parameter for PPO
+    gamma: float = 0.99  # discount factor
+
+    lr_actor: float = 1e-4
+    lr_critic: float = 3e-4
+
+    img_size: int = 64  # Image size for CNN input
+    num_envs: int = 8  # Number of parallel environments
+
+    # --- Checkpointing ---
+    save_model_freq: int = int(2e4)  # Save model every n timesteps
+    checkpoint_dir: str = "./ppo_checkpoints"
+    load_checkpoint_path: str | None = None
+    log_dir: str = "./ppo_logs"
+    reward_log_path: str = "rewards.txt"
+    loss_log_path: str = "losses.txt"
+
+
+
+    def __post_init__(self):
+        Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.log_dir).mkdir(parents=True, exist_ok=True)
+        self.reward_log_path = os.path.join(self.log_dir, self.reward_log_path)
+        self.loss_log_path = os.path.join(self.log_dir, self.loss_log_path)
+
+
 def main():
     mp.set_start_method("spawn", force=True)
     ############## Hyperparameters ##############
-    env_name = "robosuite_lift"
-    max_ep_len = 200  # max timesteps in one episode
-    max_training_timesteps = (
-        1000000  # break training loop if timeteps > max_training_timesteps
-    )
-
-    K_epochs = 10
-    update_timestep = 4000
-    eps_clip = 0.2  # clip parameter for PPO
-    gamma = 0.99  # discount factor
-
-    lr_actor = 1e-4
-    lr_critic = 3e-4
-
-    img_size = 64  # Image size for CNN input
-    num_envs = 4  # Number of parallel environments
-
-    # --- Checkpointing ---
-    save_model_freq = int(2e4)  # Save model every n timesteps
-    checkpoint_dir = "./ppo_checkpoints"
-    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
-
-    # To resume training, set `load_checkpoint_path` to the model file
-    # e.g., load_checkpoint_path = "./ppo_checkpoints/PPO_robosuite_lift_20000.pth"
-    load_checkpoint_path = None
-    #############################################
-
-    # Logging
-    log_dir = "./ppo_logs"
-    os.makedirs(log_dir, exist_ok=True)
-    reward_log_path = os.path.join(log_dir, "rewards.txt")
-    loss_log_path = os.path.join(log_dir, "losses.txt")
+    config = TrainingConfig()
     reward_history = []
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    env = make_env(img_size=img_size)
+    env = make_env(img_size=config.img_size)
     action_dim = env.action_dim
     proprio_dim = env.observation_spec()["robot0_proprio-state"].shape[0]
     del env
-    envs = VecEnv(make_env, num_envs, img_size=img_size)
+    envs = VecEnv(make_env, config.num_envs, img_size=config.img_size)
 
     memory = Memory(device)
-    ppo_agent = PPO(action_dim, img_size, proprio_dim, lr_actor, lr_critic, 
-                    gamma, K_epochs, eps_clip, device)
+    ppo_agent = PPO(action_dim, config.img_size, proprio_dim, config.lr_actor, config.lr_critic,
+                    config.gamma, config.K_epochs, config.eps_clip, device)
 
-    if load_checkpoint_path:
-        ppo_agent.load(load_checkpoint_path)
+    if config.load_checkpoint_path:
+        ppo_agent.load(config.load_checkpoint_path)
 
     time_step = 0
 
 
-    num_episodes = int(max_training_timesteps // max_ep_len)
+    num_episodes = int(config.max_training_timesteps // (config.max_ep_len * config.num_envs))
     with trange(num_episodes, desc="Episodes") as pbar:
         for _ in range(num_episodes):
             states = envs.reset()
             current_ep_reward = 0
-            for t in range(1, max_ep_len + 1):
+            for t in range(1, config.max_ep_len + 1):
                 # select action with policy
                 action, log_prob = ppo_agent.select_action(states)
                 next_states, rewards, dones = envs.step(action.numpy())
@@ -83,7 +88,7 @@ def main():
                 current_ep_reward += np.mean(rewards)
 
                 # update PPO agent
-                if len(memory) >= update_timestep:
+                if len(memory) >= config.update_timestep:
                     ppo_agent.update(memory)
                     memory.clear_memory()
                     gc.collect()
@@ -91,14 +96,14 @@ def main():
                         torch.cuda.empty_cache()
 
                 # save model checkpoint
-                if time_step % save_model_freq == 0:
-                    checkpoint_path = f"{checkpoint_dir}/PPO_{env_name}_{time_step}.pth"
+                if time_step % config.save_model_freq == 0:
+                    checkpoint_path = f"{config.checkpoint_dir}/PPO_{config.env_name}_{time_step}.pth"
                     ppo_agent.save(checkpoint_path)
             
             pbar.update(1)
             # Logging reward
             reward_history.append(current_ep_reward)
-            with open(reward_log_path, "a") as f:
+            with open(config.reward_log_path, "a") as f:
                 f.write(f"{current_ep_reward}\n")
 
             pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
@@ -106,7 +111,7 @@ def main():
     envs.close()
 
     # Save losses to file
-    with open(loss_log_path, "w") as f:
+    with open(config.loss_log_path, "w") as f:
         for loss in ppo_agent.losses:
             f.write(f"{loss}\n")
 
@@ -125,7 +130,7 @@ def main():
     plt.ylabel("Loss")
 
     plt.tight_layout()
-    plt.savefig(os.path.join(log_dir, "training_curves.png"))
+    plt.savefig(os.path.join(config.log_dir, "training_curves.png"))
     plt.show()
 
 
