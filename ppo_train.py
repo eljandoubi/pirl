@@ -21,10 +21,9 @@ def main():
     mp.set_start_method("spawn", force=True)
     ############## Hyperparameters ##############
     config = TrainingConfig()
+    run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
+    config.update_paths(run.id)
     reward_history = []
-
-    # Initialize wandb
-    wandb.init(project="ppo-robosuite", config=config.__dict__)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     env = make_env(img_size=config.img_size)

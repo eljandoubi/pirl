@@ -40,8 +40,11 @@ class TrainingConfig:
 
     fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
     max_grad_norm: float = 1.  # Max gradient norm for clipping
+    runid: str | None = None  # Wandb run ID for resuming runs
 
-    def __post_init__(self):
+    def update_paths(self, folder_name: str):
+        self.checkpoint_dir = os.path.join(self.checkpoint_dir, folder_name)
+        self.log_dir = os.path.join(self.log_dir, folder_name)
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
         Path(self.log_dir).mkdir(parents=True, exist_ok=True)
         self.reward_log_path = os.path.join(self.log_dir, self.reward_log_path)
@@ -211,10 +214,11 @@ class PPO:
 
         # Optimize policy for K epochs
         epoch_losses = []
+        eps_clip = self.config.eps_clip
         for _ in tqdm(range(self.config.K_epochs), desc="PPO Update Epochs"):
             # Evaluating old actions and values
             action_mean, action_var, state_values = self.policy(old_obs)
-            cov_mat = torch.diag(action_var)
+            cov_mat = torch.diag_embed(action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
 
             logprobs = dist.log_prob(old_actions)
@@ -227,7 +231,7 @@ class PPO:
             advantages = rewards - state_values.detach()
             surr1 = ratios * advantages
             surr2 = (
-                torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+                torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * advantages
             )
 
             # final loss of clipped objective PPO
