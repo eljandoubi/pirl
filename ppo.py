@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import MultivariateNormal
+from tqdm import tqdm
 
 from model import ActorCritic
 
@@ -210,7 +211,7 @@ class PPO:
 
         # Optimize policy for K epochs
         epoch_losses = []
-        for _ in range(self.K_epochs):
+        for _ in tqdm(range(self.config.K_epochs), desc="PPO Update Epochs"):
             # Evaluating old actions and values
             action_mean, action_var, state_values = self.policy(old_obs)
             cov_mat = torch.diag(action_var)
