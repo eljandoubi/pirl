@@ -1,5 +1,7 @@
 import os
 
+import numpy as np
+
 os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
 import robosuite as suite
 import torch.multiprocessing as mp
@@ -24,6 +26,14 @@ def make_env(device_id=-1, img_size=64):
         render_gpu_device_id=device_id,
     )
     return env
+
+
+def filter_state(state:dict[str, np.ndarray])->dict[str, np.ndarray]:
+    return {
+        "agentview_image": state["agentview_image"],
+        "agentview_depth": state["agentview_depth"],
+        "robot0_proprio-state": state["robot0_proprio-state"],
+    }
 
 
 def worker(remote, env_fn, env_kwargs):
@@ -63,7 +73,7 @@ class VecEnv:
     def reset(self):
         for r in self.remotes:
             r.send(("reset", None))
-        return [r.recv() for r in self.remotes]
+        return [filter_state(r.recv()) for r in self.remotes]
 
     def step(self, actions):
         for r, a in zip(self.remotes, actions):
@@ -72,6 +82,7 @@ class VecEnv:
         results = [r.recv() for r in self.remotes]
 
         next_states, rewards, dones = zip(*results)
+        next_states = [filter_state(state) for state in next_states]
         return next_states, rewards, dones
 
     def close(self):

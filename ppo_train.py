@@ -1,10 +1,8 @@
 import gc
 import os
-from pathlib import Path
 
 os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
 # Logging and plotting
-from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,47 +12,10 @@ from dotenv import load_dotenv
 from tqdm import trange
 
 import wandb
-from ppo import PPO, Memory
+from ppo import PPO, Memory, TrainingConfig
 from robotenv import VecEnv, make_env
 
 print("Loading environment variables...", load_dotenv())
-
-
-@dataclass
-class TrainingConfig:
-    env_name: str = "robosuite_lift"
-    max_ep_len: int = 200  # max timesteps in one episode
-    max_training_timesteps: int = (
-        1000000  # break training loop if timeteps > max_training_timesteps
-    )
-
-    K_epochs: int = 10
-    update_timestep: int = 4000
-    eps_clip: float = 0.2  # clip parameter for PPO
-    gamma: float = 0.99  # discount factor
-
-    lr_actor: float = 1e-4
-    lr_critic: float = 3e-4
-
-    img_size: int = 64  # Image size for CNN input
-    num_envs: int = 10  # Number of parallel environments
-
-    # --- Checkpointing ---
-    save_model_freq: int = int(2e4)  # Save model every n timesteps
-    checkpoint_dir: str = "./ppo_checkpoints"
-    load_checkpoint_path: str | None = None
-    log_dir: str = "./ppo_logs"
-    reward_log_path: str = "rewards.txt"
-    loss_log_path: str = "losses.txt"
-
-    fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
-
-    def __post_init__(self):
-        Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.log_dir).mkdir(parents=True, exist_ok=True)
-        self.reward_log_path = os.path.join(self.log_dir, self.reward_log_path)
-        self.loss_log_path = os.path.join(self.log_dir, self.loss_log_path)
-
 
 def main():
     mp.set_start_method("spawn", force=True)
@@ -75,15 +36,9 @@ def main():
     memory = Memory(device)
     ppo_agent = PPO(
         action_dim,
-        config.img_size,
         proprio_dim,
-        config.lr_actor,
-        config.lr_critic,
-        config.gamma,
-        config.K_epochs,
-        config.eps_clip,
         device,
-        config.fixed_policy_variance,
+        config
     )
 
     if config.load_checkpoint_path:

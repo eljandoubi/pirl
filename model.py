@@ -54,7 +54,7 @@ class ActorCritic(nn.Module):
         if fixed_policy_variance:
             action_var = torch.full((action_dim,), 0.5**2)
             self.register_buffer("action_var", action_var)
-            self.actor =nn.Linear(512, action_dim)
+            self.actor = nn.Linear(512, action_dim)
         else:
             self.actor = nn.Linear(512, action_dim * 2)  # Output both mean and log variance
 
@@ -62,6 +62,7 @@ class ActorCritic(nn.Module):
         self.critic = nn.Linear(512, 1)
 
     def forward(self, obs):
+
         img = obs["agentview_image"] / 255.0  # Normalize pixel values
         img = img.permute(0, 3, 1, 2).contiguous()  # Change to (batch, channel, height, width)
         depth = obs["agentview_depth"]
@@ -73,8 +74,6 @@ class ActorCritic(nn.Module):
         proprio = (proprio - proprio.mean(dim=1, keepdim=True)
                    ) / (proprio.std(dim=1, keepdim=True) + 1e-8
                         ).contiguous()
-
-        # Permute image dimensions to be (batch, channel, height, width)
         
         
 
@@ -95,6 +94,7 @@ class ActorCritic(nn.Module):
             action_mean, action_logvar = action_mean.chunk(2, dim=-1)
             action_logvar = torch.clamp(action_logvar, -20, 2)  # Clamp log variance for stability
             action_var = torch.exp(action_logvar)
+        action_mean = torch.tanh(action_mean)  # Ensure actions are in the range [-1, 1]
         state_value = self.critic(fused_output)
 
         return action_mean, action_var, state_value
