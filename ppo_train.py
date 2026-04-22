@@ -2,9 +2,7 @@ import gc
 import os
 
 os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
-# Logging and plotting
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.multiprocessing as mp
@@ -22,8 +20,7 @@ def main():
     ############## Hyperparameters ##############
     config = TrainingConfig()
     run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
-    config.update_paths(run.id)
-    reward_history = []
+    config.update_path(run.id)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     env = make_env(img_size=config.img_size)
@@ -78,10 +75,6 @@ def main():
                     ppo_agent.save(checkpoint_path)
 
             pbar.update(1)
-            # Logging reward
-            reward_history.append(current_ep_reward)
-            with open(config.reward_log_path, "a") as f:
-                f.write(f"{current_ep_reward}\n")
 
             # Log to wandb
             wandb.log(
@@ -89,37 +82,15 @@ def main():
                     "episode": ep,
                     "reward": current_ep_reward,
                     "timestep": time_step,
-                    "loss": ppo_agent.losses[-1] if ppo_agent.losses else None,
+                    "mse_loss": ppo_agent.mse_losses[-1],
+                    "entropy_loss": ppo_agent.entropy_losses[-1]
                 }
             )
 
             pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
 
     envs.close()
-
-    # Save losses to file
-    with open(config.loss_log_path, "w") as f:
-        for loss in ppo_agent.losses:
-            f.write(f"{loss}\n")
-
-    # Plotting
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(reward_history)
-    plt.title("Episode Reward")
-    plt.xlabel("Episode")
-    plt.ylabel("Reward")
-
-    plt.subplot(1, 2, 2)
-    plt.plot(ppo_agent.losses)
-    plt.title("PPO Loss (per update)")
-    plt.xlabel("Update Step")
-    plt.ylabel("Loss")
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(config.log_dir, "training_curves.png"))
-    plt.show()
-
+    
     # Finish wandb run
     wandb.finish()
 

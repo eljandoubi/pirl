@@ -34,21 +34,14 @@ class TrainingConfig:
     save_model_freq: int = int(2e4)  # Save model every n timesteps
     checkpoint_dir: str = "./ppo_checkpoints"
     load_checkpoint_path: str | None = None
-    log_dir: str = "./ppo_logs"
-    reward_log_path: str = "rewards.txt"
-    loss_log_path: str = "losses.txt"
 
     fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
     max_grad_norm: float = 1.  # Max gradient norm for clipping
     runid: str | None = None  # Wandb run ID for resuming runs
 
-    def update_paths(self, folder_name: str):
+    def update_path(self, folder_name: str):
         self.checkpoint_dir = os.path.join(self.checkpoint_dir, folder_name)
-        self.log_dir = os.path.join(self.log_dir, folder_name)
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.log_dir).mkdir(parents=True, exist_ok=True)
-        self.reward_log_path = os.path.join(self.log_dir, self.reward_log_path)
-        self.loss_log_path = os.path.join(self.log_dir, self.loss_log_path)
 
 class Memory:
     def __init__(self,device:torch.device):
@@ -112,27 +105,17 @@ class Memory:
     
     @staticmethod
     def compute_returns(rewards: torch.Tensor, terminals: torch.Tensor, gamma: float):
-        # Create discount factors with reset
-        gamma_mask = gamma * (1 - terminals)
-        gamma_mask[-1] = gamma  # edge case
 
-        # Reverse
-        rewards_rev = torch.flip(rewards, [0])
-        gamma_mask_rev = torch.flip(gamma_mask, [0])
+        returns = torch.zeros_like(rewards)
+        discounted = 0
 
-        # Cumulative product of discounts
-        discounts = torch.cumprod(
-            torch.cat([torch.ones(1, device=rewards.device, dtype=rewards.dtype),
-                       gamma_mask_rev[:-1]]), dim=0
-        )
+        for t in reversed(range(len(rewards))):
+            discounted = rewards[t] + gamma * discounted * (1 - terminals[t])
+            returns[t] = discounted
 
-        # Discounted cumulative sum
-        discounted = torch.cumsum(rewards_rev * discounts, dim=0) / discounts
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        return returns
 
-        # Flip back
-        rewards = torch.flip(discounted, [0])
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
-        return rewards
     
     def shape(self):
         res = {"len": len(self)}
@@ -170,7 +153,8 @@ class PPO:
         self.MseLoss = nn.MSELoss()
 
         # For logging losses
-        self.losses = []
+        self.mse_losses = []
+        self.entropy_losses = []
 
     @torch.no_grad()
     def select_action(self, state):
@@ -205,7 +189,7 @@ class PPO:
 
         (old_actions, old_states_img, old_states_depth, old_states_proprio, 
          old_logprobs, rewards) = memory.to_tensor(self.config.gamma)
-
+        
         old_obs = {
             "agentview_image": old_states_img,
             "agentview_depth": old_states_depth,
@@ -213,22 +197,29 @@ class PPO:
         }
 
         # Optimize policy for K epochs
-        epoch_losses = []
+        epoch_mse_losses = []
+        epoch_entropy_losses = []
         eps_clip = self.config.eps_clip
         for _ in tqdm(range(self.config.K_epochs), desc="PPO Update Epochs"):
             # Evaluating old actions and values
             action_mean, action_var, state_values = self.policy(old_obs)
+            
+            mse_loss = self.MseLoss(state_values, rewards.unsqueeze(1)).mean()
+            epoch_mse_losses.append(mse_loss.item())
+
             cov_mat = torch.diag_embed(action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
 
-            logprobs = dist.log_prob(old_actions)
-            dist_entropy = dist.entropy()
+            dist_entropy = dist.entropy().mean()
+            epoch_entropy_losses.append(dist_entropy.item())
 
+
+            logprobs = dist.log_prob(old_actions)
             # Finding the ratio (pi_theta / pi_theta__old)
             ratios = torch.exp(logprobs - old_logprobs.detach())
-
             # Finding Surrogate Loss
             advantages = rewards - state_values.detach()
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             surr1 = ratios * advantages
             surr2 = (
                 torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * advantages
@@ -236,22 +227,24 @@ class PPO:
 
             # final loss of clipped objective PPO
             loss = (
-                -torch.min(surr1, surr2)
-                + 0.5 * self.MseLoss(state_values, rewards.unsqueeze(1))
+                -torch.min(surr1, surr2).mean()
+                + 0.5 * mse_loss
                 - 0.01 * dist_entropy
             )
 
             # take gradient step
             self.optimizer.zero_grad()
-            loss.mean().backward()
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.config.max_grad_norm)
             self.optimizer.step()
 
-            epoch_losses.append(loss.mean().item())
+            
 
         # Log average loss for this update
-        avg_loss = sum(epoch_losses) / len(epoch_losses)
-        self.losses.append(avg_loss)
+        avg_mse_loss = np.mean(epoch_mse_losses)
+        avg_entropy_loss = np.mean(epoch_entropy_losses)
+        self.mse_losses.append(avg_mse_loss)
+        self.entropy_losses.append(avg_entropy_loss)
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())

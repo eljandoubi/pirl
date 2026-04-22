@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "matplotlib>=3.10.8",
     "mujoco>=3.7.0",
     "python-dotenv>=1.2.2",
     "robosuite>=1.5.2",

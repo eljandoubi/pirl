@@ -63,19 +63,16 @@ class ActorCritic(nn.Module):
 
     def forward(self, obs):
 
-        img = obs["agentview_image"] / 255.0  # Normalize pixel values
+        img = (obs["agentview_image"]-128.) / 128.0  # Normalize to [-1, 1]
         img = img.permute(0, 3, 1, 2).contiguous()  # Change to (batch, channel, height, width)
-        depth = obs["agentview_depth"]
-        depth = torch.nan_to_num(depth, nan=1.0, posinf=1.0, neginf=0.0)
-        depth = torch.clamp(depth, 0.0, 1.0)
+        
+        depth = (obs["agentview_depth"]-0.5) / 0.5  # Normalize to [-1, 1]
         depth = depth.permute(0, 3, 1, 2).contiguous()
 
         proprio = obs["robot0_proprio-state"]
         proprio = (proprio - proprio.mean(dim=1, keepdim=True)
                    ) / (proprio.std(dim=1, keepdim=True) + 1e-8
                         ).contiguous()
-        
-        
 
         img_features = self.image_conv(img)
         depth_features = self.depth_conv(depth)
