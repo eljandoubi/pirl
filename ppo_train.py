@@ -80,7 +80,6 @@ def main():
             log_payload = {
                 "episode": ep,
                 "reward": current_ep_reward,
-                "timestep": time_step,
             }
             if ppo_agent.mse_losses:
                 log_payload["mse_loss"] = ppo_agent.mse_losses[-1]
@@ -88,7 +87,7 @@ def main():
                 log_payload["entropy_loss"] = ppo_agent.entropy_losses[-1]
             
             wandb.log(
-                log_payload
+                log_payload, step=time_step
             )
 
             pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
