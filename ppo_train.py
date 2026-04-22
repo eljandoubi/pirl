@@ -19,7 +19,6 @@ print("Loading environment variables...", load_dotenv())
 def main():
     exit_code = 0
     try:
-        ############## Hyperparameters ##############
         config = TrainingConfig()
         run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
         config.update_path(run.id)

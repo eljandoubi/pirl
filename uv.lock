@@ -973,6 +973,7 @@ dependencies = [
     { name = "mujoco" },
     { name = "python-dotenv" },
     { name = "robosuite" },
+    { name = "robosuite-models" },
     { name = "torch" },
     { name = "tqdm" },
     { name = "wandb" },
@@ -983,6 +984,7 @@ requires-dist = [
     { name = "mujoco", specifier = ">=3.7.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "robosuite", specifier = ">=1.5.2" },
+    { name = "robosuite-models", specifier = ">=1.0.0" },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "wandb", specifier = ">=0.26.0" },
@@ -1465,6 +1467,14 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/27/96/13c4c63860a3809740efa7406d01ff8ea3ebbdbd5d35eec0e8ead486f654/robosuite-1.5.2.tar.gz", hash = "sha256:9f128d57e4f090a9d78d93b246bd2a862b7fa6fc2ccb837aac06cf0ab19fde78", size = 155629116, upload-time = "2025-12-24T22:31:47.394Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/54/3c0940c92d381eb5837cd29bf2c9fbf0a9dff313a2b2779e3902665276b3/robosuite-1.5.2-py3-none-any.whl", hash = "sha256:b9e02df55de8949739de6ba1d196d2ba59cf33c51a76efcfbe5c2f73cdcf99ce", size = 156827641, upload-time = "2025-12-24T22:31:40.166Z" },
+]
+
+[[package]]
+name = "robosuite-models"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/93/8001bef17c1bbce6a9be55dcf9a87ff0d95512e6e9d30e574ea8a62b3703/robosuite_models-1.0.0-1-py3-none-any.whl", hash = "sha256:f764c44aef7fb36c8ebd2c4f27119678da6d662a419ca4f6f8a96dc4cbbf405d", size = 59114547, upload-time = "2024-10-30T00:26:11.329Z" },
 ]
 
 [[package]]
