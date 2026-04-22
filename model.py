@@ -4,7 +4,7 @@ import torch.nn as nn
 
 # --- 2. Multi-Modal Actor-Critic Network ---
 class ActorCritic(nn.Module):
-    def __init__(self, action_dim, img_size=64):
+    def __init__(self, action_dim, img_size=64, proprio_dim=50):
         super(ActorCritic, self).__init__()
 
         # Image processing network (CNN) for RGB
@@ -31,7 +31,7 @@ class ActorCritic(nn.Module):
 
         # Calculate the size of the flattened CNN outputs
         # A dummy forward pass helps in determining the flat feature size
-        with torch.no_grad():
+        with torch.inference_mode():
             dummy_img = torch.zeros(1, 3, img_size, img_size)
             dummy_depth = torch.zeros(1, 1, img_size, img_size)
             img_feature_size = self.image_conv(dummy_img).shape[1]
@@ -39,7 +39,7 @@ class ActorCritic(nn.Module):
 
         # Proprioceptive state processing network (MLP)
         self.proprio_mlp = nn.Sequential(
-            nn.Linear(50, 128),  # Proprio state size for Panda is 50
+            nn.Linear(proprio_dim, 128),
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
@@ -60,17 +60,20 @@ class ActorCritic(nn.Module):
 
     def forward(self, obs):
         img = obs["agentview_image"] / 255.0  # Normalize pixel values
+        img = img.permute(0, 3, 1, 2).contiguous()  # Change to (batch, channel, height, width)
         depth = obs["agentview_depth"]
         depth = torch.nan_to_num(depth, nan=1.0, posinf=1.0, neginf=0.0)
         depth = torch.clamp(depth, 0.0, 1.0)
-        depth = depth / (depth.max() + 1e-8)
-        depth = depth.contiguous()
+        depth = depth.permute(0, 3, 1, 2).contiguous()
+
         proprio = obs["robot0_proprio-state"]
-        proprio = (proprio - proprio.mean(dim=1, keepdim=True)) / (proprio.std(dim=1, keepdim=True) + 1e-8)
+        proprio = (proprio - proprio.mean(dim=1, keepdim=True)
+                   ) / (proprio.std(dim=1, keepdim=True) + 1e-8
+                        ).contiguous()
 
         # Permute image dimensions to be (batch, channel, height, width)
-        img = img.permute(0, 3, 1, 2)
-        depth = depth.permute(0, 3, 1, 2)
+        
+        
 
         img_features = self.image_conv(img)
         depth_features = self.depth_conv(depth)

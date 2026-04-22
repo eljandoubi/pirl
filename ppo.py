@@ -8,14 +8,14 @@ from model import ActorCritic
 # --- 3. PPO Agent ---
 class PPO:
     def __init__(
-        self, action_dim,img_size, lr_actor, lr_critic, gamma, K_epochs, eps_clip, device
+        self, action_dim, img_size, proprio_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, device
     ):
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.device = device
 
-        self.policy = ActorCritic(action_dim, img_size).to(device)
+        self.policy = ActorCritic(action_dim, img_size, proprio_dim).to(device)
         self.optimizer = torch.optim.Adam(
             [
                 {"params": self.policy.actor.parameters(), "lr": lr_actor},
@@ -23,7 +23,7 @@ class PPO:
             ]
         )
 
-        self.policy_old = ActorCritic(action_dim, img_size).to(device)
+        self.policy_old = ActorCritic(action_dim, img_size, proprio_dim).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
@@ -33,23 +33,18 @@ class PPO:
         self.losses = []
 
     def select_action(self, state):
+
         with torch.no_grad():
             # Preprocess state for the network
-            img = (
-                torch.tensor(state["agentview_image"], dtype=torch.float32)
-                .to(self.device, non_blocking=True)
-                .unsqueeze(0)
-            )
-            depth = (
-                torch.tensor(state["agentview_depth"], dtype=torch.float32)
-                .to(self.device, non_blocking=True)
-                .unsqueeze(0)
-            )
-            proprio = (
-                torch.tensor(state["robot0_proprio-state"], dtype=torch.float32)
-                .to(self.device, non_blocking=True)
-                .unsqueeze(0)
-            )
+            if not isinstance(state, (list, tuple)):
+                state = [state]
+            
+            img = torch.stack([torch.as_tensor(s["agentview_image"], dtype=torch.float32) for s in state]).to(
+                self.device, non_blocking=True)
+            depth = torch.stack([torch.as_tensor(s["agentview_depth"], dtype=torch.float32) for s in state]).to(
+                self.device, non_blocking=True)
+            proprio = torch.stack([torch.as_tensor(s["robot0_proprio-state"], dtype=torch.float32) for s in state]).to(
+                self.device, non_blocking=True)
 
             obs = {
                 "agentview_image": img,
@@ -64,7 +59,7 @@ class PPO:
             action = dist.sample()
             action_logprob = dist.log_prob(action)
 
-        return action.detach().cpu().numpy().flatten(), action_logprob.detach()
+        return action.detach().cpu(), action_logprob.detach().cpu()
 
     def update(self, memory):
         # Monte Carlo estimate of rewards:
@@ -83,13 +78,7 @@ class PPO:
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # convert list to tensor
-        old_states_img = torch.stack([s["agentview_image"] for s in memory.states]).to(self.device, non_blocking=True)
-        old_states_depth = torch.stack([s["agentview_depth"] for s in memory.states]).to(self.device, non_blocking=True)
-        old_states_proprio = torch.stack([s["robot0_proprio-state"] for s in memory.states]).to(self.device, non_blocking=True)
-        old_actions = torch.squeeze(torch.stack(memory.actions, dim=0)).to(self.device, non_blocking=True)
-        old_logprobs = torch.squeeze(torch.stack(memory.logprobs, dim=0)).to(
-            self.device, non_blocking=True
-        )
+        old_actions, old_states_img, old_states_depth, old_states_proprio, old_logprobs = memory.to_tensor()
 
         old_obs = {
             "agentview_image": old_states_img,
@@ -162,7 +151,8 @@ class PPO:
 
 
 class Memory:
-    def __init__(self):
+    def __init__(self,device):
+        self.device = device
         self.actions = []
         self.states = []
         self.logprobs = []
@@ -171,7 +161,6 @@ class Memory:
 
     def append(self, action, state, logprob, reward, is_terminal):
 
-        action = torch.as_tensor(action, dtype=torch.float32)
         state_on_device = {
             k: torch.as_tensor(v, dtype=torch.float32)
             for k, v in state.items()
@@ -183,11 +172,48 @@ class Memory:
         self.rewards.append(reward)
         self.is_terminals.append(is_terminal)
 
+    def extend(self, actions, states, logprobs, rewards, is_terminals):
+        states_on_device = []
+        for state in states:
+            state_on_device = {
+                k: torch.as_tensor(v, dtype=torch.float32)
+                for k, v in state.items()
+            }
+            states_on_device.append(state_on_device)
+
+        self.actions.extend(actions)
+        self.states.extend(states_on_device)
+        self.logprobs.extend(logprobs)
+        self.rewards.extend(rewards)
+        self.is_terminals.extend(is_terminals)
+
     def clear_memory(self):
-        del self.actions[:]
-        del self.states[:]
-        del self.logprobs[:]
-        del self.rewards[:]
-        del self.is_terminals[:]
+        self.actions.clear()
+        self.states.clear()
+        self.logprobs.clear()
+        self.rewards.clear()
+        self.is_terminals.clear()
+
+    def __len__(self):
+        return len(self.actions)
+    
+    def to_tensor(self)->tuple[torch.Tensor,...]:
+        actions = torch.stack(self.actions).to(self.device, non_blocking=True)
+        states_img = torch.stack([s["agentview_image"] for s in self.states]).to(self.device, non_blocking=True)
+        states_depth = torch.stack([s["agentview_depth"] for s in self.states]).to(self.device, non_blocking=True)
+        states_proprio = torch.stack([s["robot0_proprio-state"] for s in self.states]).to(self.device, non_blocking=True)
+        logprobs = torch.stack(self.logprobs).to(self.device, non_blocking=True)
+
+        return actions, states_img, states_depth, states_proprio, logprobs
+    
+    def shape(self):
+        res = {"len": len(self)}
+        if len(self) > 0:
+            res["actions"] = self.actions[0].shape
+            res["states_img"] = self.states[0]["agentview_image"].shape
+            res["states_depth"] = self.states[0]["agentview_depth"].shape
+            res["states_proprio"] = self.states[0]["robot0_proprio-state"].shape
+            res["logprobs"] = self.logprobs[0].shape
+        return res
 
 

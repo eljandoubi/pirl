@@ -5,15 +5,17 @@ from pathlib import Path
 os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
 # Logging and plotting
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
+import torch.multiprocessing as mp
 from tqdm import trange
 
 from ppo import PPO, Memory
-from robotenv import make_env
+from robotenv import VecEnv, make_env
 
 
 def main():
-
+    mp.set_start_method("spawn", force=True)
     ############## Hyperparameters ##############
     env_name = "robosuite_lift"
     max_ep_len = 200  # max timesteps in one episode
@@ -30,6 +32,7 @@ def main():
     lr_critic = 3e-4
 
     img_size = 64  # Image size for CNN input
+    num_envs = 4  # Number of parallel environments
 
     # --- Checkpointing ---
     save_model_freq = int(2e4)  # Save model every n timesteps
@@ -49,38 +52,38 @@ def main():
     reward_history = []
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    env = make_env(#device_id=device.index if torch.cuda.is_available() else -1,
-                   img_size=img_size)
-    action_dim = env.action_spec[0].shape[0]
-    memory = Memory()
-    ppo_agent = PPO(action_dim, img_size, lr_actor, lr_critic, 
+    env = make_env(img_size=img_size)
+    action_dim = env.action_dim
+    proprio_dim = env.observation_spec()["robot0_proprio-state"].shape[0]
+    del env
+    envs = VecEnv(make_env, num_envs, img_size=img_size)
+
+    memory = Memory(device)
+    ppo_agent = PPO(action_dim, img_size, proprio_dim, lr_actor, lr_critic, 
                     gamma, K_epochs, eps_clip, device)
 
     if load_checkpoint_path:
         ppo_agent.load(load_checkpoint_path)
 
     time_step = 0
-    i_episode = 0
+
 
     num_episodes = int(max_training_timesteps // max_ep_len)
     with trange(num_episodes, desc="Episodes") as pbar:
         for _ in range(num_episodes):
-            state = env.reset()
+            states = envs.reset()
             current_ep_reward = 0
-
             for t in range(1, max_ep_len + 1):
                 # select action with policy
-                action, log_prob = ppo_agent.select_action(state)
-                state, reward, done, _ = env.step(action)
-
-                # saving reward and is_terminals
-                memory.append(action, state, log_prob, reward, done)
-
+                action, log_prob = ppo_agent.select_action(states)
+                next_states, rewards, dones = envs.step(action.numpy())
+                memory.extend(action, states, log_prob, rewards, dones)
+                states = next_states
                 time_step += 1
-                current_ep_reward += reward
+                current_ep_reward += np.mean(rewards)
 
                 # update PPO agent
-                if time_step % update_timestep == 0:
+                if len(memory) >= update_timestep:
                     ppo_agent.update(memory)
                     memory.clear_memory()
                     gc.collect()
@@ -91,13 +94,8 @@ def main():
                 if time_step % save_model_freq == 0:
                     checkpoint_path = f"{checkpoint_dir}/PPO_{env_name}_{time_step}.pth"
                     ppo_agent.save(checkpoint_path)
-
-                if done:
-                    break
-
-            i_episode += 1
+            
             pbar.update(1)
-
             # Logging reward
             reward_history.append(current_ep_reward)
             with open(reward_log_path, "a") as f:
@@ -105,7 +103,7 @@ def main():
 
             pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
 
-    env.close()
+    envs.close()
 
     # Save losses to file
     with open(loss_log_path, "w") as f:
