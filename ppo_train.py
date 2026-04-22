@@ -16,6 +16,7 @@ from rollout import RolloutBuffer  # noqa: E402
 print("Loading environment variables...", load_dotenv())
 
 def main():
+    exit_code = 0
     try:
         ############## Hyperparameters ##############
         config = TrainingConfig()
@@ -90,6 +91,7 @@ def main():
                         ppo_agent.save(checkpoint_path)
 
                     pbar.update(1)
+                    pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
 
                 # Log to wandb
                 log_payload = {
@@ -107,11 +109,13 @@ def main():
                     log_payload, step=time_step
                 )
 
-                pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        exit_code = 1
 
     finally:
 
-        wandb.finish()
+        wandb.finish(exit_code=exit_code)
         env.close()
 
 
