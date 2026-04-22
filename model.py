@@ -52,7 +52,7 @@ class ActorCritic(nn.Module):
 
         # Actor head
         if fixed_policy_variance:
-            action_var = torch.full((action_dim,), 0.5**2, device=self.device)
+            action_var = torch.full((action_dim,), 0.5**2)
             self.register_buffer("action_var", action_var)
             self.actor =nn.Linear(512, action_dim)
         else:
