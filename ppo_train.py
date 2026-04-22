@@ -1,6 +1,8 @@
 import gc
 import os
 
+from rollout import RolloutBuffer
+
 os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
 
 import numpy as np
@@ -10,7 +12,7 @@ from dotenv import load_dotenv
 from tqdm import trange
 
 import wandb
-from ppo import PPO, Memory, TrainingConfig
+from ppo import PPO, TrainingConfig
 from robotenv import VecEnv, make_env
 
 print("Loading environment variables...", load_dotenv())
@@ -25,16 +27,19 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     env = make_env(img_size=config.img_size)
     action_dim = env.action_dim
-    proprio_dim = env.observation_spec()["robot0_proprio-state"].shape[0]
+    keys = ["agentview_image", "agentview_depth", "robot0_proprio-state"]
+    obs_shapes = {k: env.observation_spec()[k].shape for k in keys}
+    env.close()
     del env
     envs = VecEnv(make_env, config.num_envs, img_size=config.img_size,
                   max_episode_steps=config.max_ep_len)
 
-    memory = Memory(device)
+    buffer = RolloutBuffer(config.max_ep_len, config.num_envs, obs_shapes, action_dim, device)
+    print(buffer)
     ppo_agent = PPO(
         action_dim,
-        proprio_dim,
         device,
+        obs_shapes,
         config
     )
 
@@ -44,25 +49,27 @@ def main():
     time_step = 0
 
     num_episodes = int(
-        config.max_training_timesteps // (config.max_ep_len * config.num_envs)
-    )
+        config.max_training_timesteps // config.update_timestep
+    )+1
     with trange(num_episodes, desc="Episodes") as pbar:
         for ep in range(num_episodes):
             states = envs.reset()
             current_ep_reward = 0
             for t in range(1, config.max_ep_len + 1):
                 # select action with policy
-                action, log_prob = ppo_agent.select_action(states)
-                next_states, rewards, dones = envs.step(action.numpy().clip(-1, 1))
-                memory.extend(action, states, log_prob, rewards, dones)
+                action, log_prob, values, obs = ppo_agent.select_action(states)
+                envs_actions = action.detach().cpu().numpy().clip(-1, 1)
+                next_states, rewards, dones = envs.step(envs_actions)
+                buffer.add(obs, action, rewards, dones, values, log_prob)
                 states = next_states
                 time_step += 1
                 current_ep_reward += np.mean(rewards)
 
                 # update PPO agent
-                if len(memory) >= config.update_timestep:
-                    ppo_agent.update(memory)
-                    memory.clear_memory()
+                if len(buffer) >= config.update_timestep:
+                    assert len(buffer) == config.update_timestep, f"Buffer length {len(buffer)} does not match expected {config.update_timestep}"
+                    ppo_agent.update(buffer, next_states)
+                    buffer.reset()
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()

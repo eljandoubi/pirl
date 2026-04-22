@@ -9,20 +9,22 @@ from torch.distributions import MultivariateNormal
 from tqdm import tqdm
 
 from model import ActorCritic
+from rollout import RolloutBuffer
 
 
 @dataclass
 class TrainingConfig:
     env_name: str = "robosuite_lift"
-    max_ep_len: int = 200  # max timesteps in one episode
+    max_ep_len: int = 512  # max timesteps in one episode
     max_training_timesteps: int = (
         1000000  # break training loop if timeteps > max_training_timesteps
     )
 
     K_epochs: int = 100
-    update_timestep: int = 4000
+    update_timestep: int = 4096
     eps_clip: float = 0.2  # clip parameter for PPO
     gamma: float = 0.99  # discount factor
+    lam: float = 0.95  # GAE lambda parameter
 
     lr_actor: float = 1e-4
     lr_critic: float = 3e-4
@@ -39,114 +41,46 @@ class TrainingConfig:
     max_grad_norm: float = 1.  # Max gradient norm for clipping
     runid: str | None = None  # Wandb run ID for resuming runs
 
+    def __post_init__(self):
+        
+        assert self.max_ep_len * self.num_envs == self.update_timestep, "max_ep_len * num_envs must equal update_timestep for proper buffer sizing"
+        assert self.lr_actor > 0, "Learning rate for actor must be positive"
+        assert self.lr_critic > 0, "Learning rate for critic must be positive"
+        assert self.gamma > 0 and self.gamma <= 1, "Gamma must be in (0, 1]"
+        assert self.lam >= 0 and self.lam <= 1, "Lambda must be in [0, 1]"
+        assert self.eps_clip > 0, "Epsilon clip must be positive"
+        assert self.K_epochs > 0, "K_epochs must be positive"
+        assert self.max_ep_len > 0, "max_ep_len must be positive"
+        assert self.num_envs > 0, "num_envs must be positive"
+        assert self.save_model_freq > 0, "save_model_freq must be positive"
+        if self.load_checkpoint_path is not None:
+            assert os.path.isfile(self.load_checkpoint_path), f"Checkpoint path {self.load_checkpoint_path} does not exist"
+
     def update_path(self, folder_name: str):
         self.checkpoint_dir = os.path.join(self.checkpoint_dir, folder_name)
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
-class Memory:
-    def __init__(self,device:torch.device):
-        self.device = device
-        self.actions: list[torch.Tensor] = []
-        self.states: list[dict[str, torch.Tensor]] = []
-        self.logprobs: list[torch.Tensor] = []
-        self.rewards: list[torch.Tensor] = []
-        self.is_terminals: list[torch.Tensor] = []
-
-    def extend(self, actions: torch.Tensor, states: list[dict[str, np.ndarray]], logprobs: torch.Tensor,
-               rewards: list[float], is_terminals: list[bool]):
-        states_on_device = []
-        for state in states:
-            state_on_device = {
-                k: torch.as_tensor(v, dtype=torch.float32)
-                for k, v in state.items()
-            }
-            states_on_device.append(state_on_device)
-
-        rewards = torch.as_tensor(rewards, dtype=torch.float32)
-        is_terminals = torch.as_tensor(is_terminals, dtype=torch.float32)
-
-        self.actions.extend(actions)
-        self.states.extend(states_on_device)
-        self.logprobs.extend(logprobs)
-        self.rewards.extend(rewards)
-        self.is_terminals.extend(is_terminals)
-
-    def clear_memory(self):
-        self.actions.clear()
-        self.states.clear()
-        self.logprobs.clear()
-        self.rewards.clear()
-        self.is_terminals.clear()
-
-    def __len__(self):
-        return len(self.actions)
-    
-    def __getitem__(self, idx):
-        return {
-            "action": self.actions[idx],
-            "state": self.states[idx],
-            "logprob": self.logprobs[idx],
-            "reward": self.rewards[idx],
-            "is_terminal": self.is_terminals[idx],
-        }
-    
-    def to_tensor(self, gamma:float)->tuple[torch.Tensor,...]:
-        rewards = torch.stack(self.rewards).to(self.device, non_blocking=True)
-        is_terminals = torch.stack(self.is_terminals).to(self.device, non_blocking=True)
-        actions = torch.stack(self.actions).to(self.device, non_blocking=True)
-        states_img = torch.stack([s["agentview_image"] for s in self.states]).to(self.device, non_blocking=True)
-        states_depth = torch.stack([s["agentview_depth"] for s in self.states]).to(self.device, non_blocking=True)
-        states_proprio = torch.stack([s["robot0_proprio-state"] for s in self.states]).to(self.device, non_blocking=True)
-        logprobs = torch.stack(self.logprobs).to(self.device, non_blocking=True)
-        
-        rewards = self.compute_returns(rewards, is_terminals, gamma)
-
-        return actions, states_img, states_depth, states_proprio, logprobs, rewards
-    
-    @staticmethod
-    def compute_returns(rewards: torch.Tensor, terminals: torch.Tensor, gamma: float):
-
-        returns = torch.zeros_like(rewards)
-        discounted = 0
-
-        for t in reversed(range(len(rewards))):
-            discounted = rewards[t] + gamma * discounted * (1 - terminals[t])
-            returns[t] = discounted
-
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-        return returns
-
-    
-    def shape(self):
-        res = {"len": len(self)}
-        if len(self) > 0:
-            res["actions"] = self.actions[0].shape
-            res["states_img"] = self.states[0]["agentview_image"].shape
-            res["states_depth"] = self.states[0]["agentview_depth"].shape
-            res["states_proprio"] = self.states[0]["robot0_proprio-state"].shape
-            res["logprobs"] = self.logprobs[0].shape,
-            res["rewards"] = self.rewards[0].shape,
-            res["is_terminals"] = self.is_terminals[0].shape,
-        return res
 
 class PPO:
     def __init__(
-        self, action_dim:int, proprio_dim:int, device:torch.device, config: TrainingConfig
+        self, action_dim:int, device:torch.device, 
+        obs_shapes: dict[str,tuple[int,...]], config: TrainingConfig
 
     ):
         self.config = config
         self.device = device
+        self.obs_shapes = obs_shapes
 
-        self.policy = ActorCritic(action_dim, config.img_size, proprio_dim,
+        self.policy = ActorCritic(action_dim, config.img_size, proprio_dim=obs_shapes["robot0_proprio-state"][0],
                                   fixed_policy_variance=config.fixed_policy_variance).to(device)
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             [
                 {"params": self.policy.actor.parameters(), "lr": config.lr_actor},
                 {"params": self.policy.critic.parameters(), "lr": config.lr_critic},
             ]
         )
 
-        self.policy_old = ActorCritic(action_dim, config.img_size, proprio_dim,
+        self.policy_old = ActorCritic(action_dim, config.img_size,  proprio_dim=obs_shapes["robot0_proprio-state"][0],
                                       fixed_policy_variance=config.fixed_policy_variance).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
@@ -158,44 +92,42 @@ class PPO:
         self.surrogate_losses = []
 
     @torch.no_grad()
-    def select_action(self, state):
-        # Preprocess state for the network
-        if not isinstance(state, (list, tuple)):
-            state = [state]
+    def select_action(self, state: list[dict[str, np.ndarray]] | dict[str, np.ndarray]):
         
-        img = torch.stack([torch.as_tensor(s["agentview_image"], dtype=torch.float32) for s in state]).to(
-            self.device, non_blocking=True)
-        depth = torch.stack([torch.as_tensor(s["agentview_depth"], dtype=torch.float32) for s in state]).to(
-            self.device, non_blocking=True)
-        proprio = torch.stack([torch.as_tensor(s["robot0_proprio-state"], dtype=torch.float32) for s in state]).to(
-            self.device, non_blocking=True)
+        obs = self.get_obs_from_state(state)
 
-        obs = {
-            "agentview_image": img,
-            "agentview_depth": depth,
-            "robot0_proprio-state": proprio,
-        }
-
-        action_mean, action_var, _ = self.policy_old(obs)
+        action_mean, action_var, values = self.policy_old(obs)
         cov_mat = torch.diag_embed(action_var)
         dist = MultivariateNormal(action_mean, cov_mat)
 
         action = dist.sample()
         action_logprob = dist.log_prob(action)
 
-        return action.cpu(), action_logprob.cpu()
+        return action, action_logprob, values, obs
+    
+    def get_obs_from_state(self, state: list[dict[str, np.ndarray]] | dict[str, np.ndarray]):
+        # Preprocess state for the network
+        if not isinstance(state, (list, tuple)):
+            state = [state]
+        obs = {}
+        for k in self.obs_shapes:
+            obs[k] = torch.stack([torch.as_tensor(s[k], dtype=torch.float32)
+                                  for s in state]).to(self.device, non_blocking=True)
+        return obs
 
-    def update(self, memory: Memory):
+    def update(self, buffer: RolloutBuffer, last_obs: list[dict[str, np.ndarray]] | dict[str, np.ndarray]):
 
 
-        (old_actions, old_states_img, old_states_depth, old_states_proprio, 
-         old_logprobs, rewards) = memory.to_tensor(self.config.gamma)
+        with torch.no_grad():
+            last_value = self.policy(self.get_obs_from_state(last_obs))[2].squeeze()
+
+        returns, advantages = buffer.compute_gae(last_value, self.config.gamma, self.config.lam)
         
-        old_obs = {
-            "agentview_image": old_states_img,
-            "agentview_depth": old_states_depth,
-            "robot0_proprio-state": old_states_proprio,
-        }
+        returns = returns.reshape(-1)
+        advantages = advantages.reshape(-1)
+
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        batch = buffer.get()
 
         # Optimize policy for K epochs
         epoch_mse_losses = []
@@ -204,9 +136,9 @@ class PPO:
         eps_clip = self.config.eps_clip
         for _ in tqdm(range(self.config.K_epochs), desc="PPO Update Epochs"):
             # Evaluating old actions and values
-            action_mean, action_var, state_values = self.policy(old_obs)
+            action_mean, action_var, state_values = self.policy(batch["obs"])
             
-            mse_loss = self.MseLoss(state_values, rewards.unsqueeze(1)).mean()
+            mse_loss = self.MseLoss(state_values.squeeze(1), returns)
             epoch_mse_losses.append(mse_loss.item())
 
             cov_mat = torch.diag_embed(action_var)
@@ -216,12 +148,11 @@ class PPO:
             epoch_entropy_losses.append(dist_entropy.item())
 
 
-            logprobs = dist.log_prob(old_actions)
+            logprobs = dist.log_prob(batch["actions"])
             # Finding the ratio (pi_theta / pi_theta__old)
-            ratios = torch.exp(logprobs - old_logprobs.detach())
+            ratios = torch.exp(logprobs - batch["logprobs"].detach())
             # Finding Surrogate Loss
-            advantages = rewards - state_values.detach()
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            
             surr1 = ratios * advantages
             surr2 = (
                 torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * advantages
