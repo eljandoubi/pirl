@@ -18,7 +18,7 @@ class TrainingConfig:
         1000000  # break training loop if timeteps > max_training_timesteps
     )
 
-    K_epochs: int = 10
+    K_epochs: int = 100
     update_timestep: int = 4000
     eps_clip: float = 0.2  # clip parameter for PPO
     gamma: float = 0.99  # discount factor
@@ -118,7 +118,8 @@ class Memory:
 
         # Cumulative product of discounts
         discounts = torch.cumprod(
-            torch.cat([torch.ones(1), gamma_mask_rev[:-1]]), dim=0
+            torch.cat([torch.ones(1, device=rewards.device, dtype=rewards.dtype),
+                       gamma_mask_rev[:-1]]), dim=0
         )
 
         # Discounted cumulative sum

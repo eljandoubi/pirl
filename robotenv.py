@@ -9,7 +9,7 @@ import torch.multiprocessing as mp
 
 # --- 1. Environment Setup ---
 # Function to create the robosuite environment
-def make_env(device_id=-1, img_size=64):
+def make_env(device_id=-1, img_size=64, max_episode_steps=200):
     env = suite.make(
         "Lift",
         robots="Panda",
@@ -22,7 +22,7 @@ def make_env(device_id=-1, img_size=64):
         camera_depths=True,
         reward_shaping=True,
         control_freq=20,
-        horizon=200,
+        horizon=max_episode_steps,
         render_gpu_device_id=device_id,
     )
     return env

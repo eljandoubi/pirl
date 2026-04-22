@@ -31,7 +31,8 @@ def main():
     action_dim = env.action_dim
     proprio_dim = env.observation_spec()["robot0_proprio-state"].shape[0]
     del env
-    envs = VecEnv(make_env, config.num_envs, img_size=config.img_size)
+    envs = VecEnv(make_env, config.num_envs, img_size=config.img_size,
+                  max_episode_steps=config.max_ep_len)
 
     memory = Memory(device)
     ppo_agent = PPO(
