@@ -15,13 +15,12 @@ from rollout import RolloutBuffer
 @dataclass
 class TrainingConfig:
     env_name: str = "robosuite_lift"
-    max_ep_len: int = 512  # max timesteps in one episode
+    max_ep_len: int = 1024  # max timesteps in one episode
     max_training_timesteps: int = (
         1000000  # break training loop if timeteps > max_training_timesteps
     )
 
     K_epochs: int = 100
-    update_timestep: int = 4096
     eps_clip: float = 0.2  # clip parameter for PPO
     gamma: float = 0.99  # discount factor
     lam: float = 0.95  # GAE lambda parameter
@@ -43,7 +42,7 @@ class TrainingConfig:
 
     def __post_init__(self):
         
-        assert self.max_ep_len * self.num_envs == self.update_timestep, "max_ep_len * num_envs must equal update_timestep for proper buffer sizing"
+        self.update_timestep = self.max_ep_len * self.num_envs  # Number of timesteps to collect before each PPO update
         assert self.lr_actor > 0, "Learning rate for actor must be positive"
         assert self.lr_critic > 0, "Learning rate for critic must be positive"
         assert self.gamma > 0 and self.gamma <= 1, "Gamma must be in (0, 1]"
@@ -91,11 +90,14 @@ class PPO:
         self.entropy_losses = []
         self.surrogate_losses = []
 
-    @torch.no_grad()
-    def select_action(self, state: list[dict[str, np.ndarray]] | dict[str, np.ndarray]):
-        
-        obs = self.get_obs_from_state(state)
 
+    @staticmethod
+    def obs_to_device(obs: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+        return {k: v.to(device, non_blocking=True) for k, v in obs.items()}
+
+    @torch.no_grad()
+    def select_action(self, obs: dict[str, torch.Tensor]):
+        obs = self.obs_to_device(obs, self.device)
         action_mean, action_var, values = self.policy_old(obs)
         cov_mat = torch.diag_embed(action_var)
         dist = MultivariateNormal(action_mean, cov_mat)
@@ -105,21 +107,12 @@ class PPO:
 
         return action, action_logprob, values, obs
     
-    def get_obs_from_state(self, state: list[dict[str, np.ndarray]] | dict[str, np.ndarray]):
-        # Preprocess state for the network
-        if not isinstance(state, (list, tuple)):
-            state = [state]
-        obs = {}
-        for k in self.obs_shapes:
-            obs[k] = torch.stack([torch.as_tensor(s[k], dtype=torch.float32)
-                                  for s in state]).to(self.device, non_blocking=True)
-        return obs
 
-    def update(self, buffer: RolloutBuffer, last_obs: list[dict[str, np.ndarray]] | dict[str, np.ndarray]):
 
+    def update(self, buffer: RolloutBuffer, last_obs: dict[str, torch.Tensor]):
 
         with torch.no_grad():
-            last_value = self.policy(self.get_obs_from_state(last_obs))[2].squeeze()
+            last_value = self.policy(last_obs)[2].squeeze()
 
         returns, advantages = buffer.compute_gae(last_value, self.config.gamma, self.config.lam)
         
