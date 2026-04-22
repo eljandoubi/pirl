@@ -77,14 +77,18 @@ def main():
             pbar.update(1)
 
             # Log to wandb
+            log_payload = {
+                "episode": ep,
+                "reward": current_ep_reward,
+                "timestep": time_step,
+            }
+            if ppo_agent.mse_losses:
+                log_payload["mse_loss"] = ppo_agent.mse_losses[-1]
+            if ppo_agent.entropy_losses:
+                log_payload["entropy_loss"] = ppo_agent.entropy_losses[-1]
+            
             wandb.log(
-                {
-                    "episode": ep,
-                    "reward": current_ep_reward,
-                    "timestep": time_step,
-                    "mse_loss": ppo_agent.mse_losses[-1],
-                    "entropy_loss": ppo_agent.entropy_losses[-1]
-                }
+                log_payload
             )
 
             pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
