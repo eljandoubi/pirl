@@ -11,10 +11,13 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 import wandb
+from dotenv import load_dotenv
 from tqdm import trange
 
 from ppo import PPO, Memory
 from robotenv import VecEnv, make_env
+
+print("Loading environment variables...", load_dotenv())
 
 
 @dataclass
