@@ -2,15 +2,15 @@ import gc
 import os
 from pathlib import Path
 
-os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
+os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
 # Logging and plotting
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
-import wandb
 import numpy as np
 import torch
 import torch.multiprocessing as mp
+import wandb
 from tqdm import trange
 
 from ppo import PPO, Memory
@@ -21,7 +21,9 @@ from robotenv import VecEnv, make_env
 class TrainingConfig:
     env_name: str = "robosuite_lift"
     max_ep_len: int = 200  # max timesteps in one episode
-    max_training_timesteps: int = 1000000  # break training loop if timeteps > max_training_timesteps
+    max_training_timesteps: int = (
+        1000000  # break training loop if timeteps > max_training_timesteps
+    )
 
     K_epochs: int = 10
     update_timestep: int = 4000
@@ -41,8 +43,6 @@ class TrainingConfig:
     log_dir: str = "./ppo_logs"
     reward_log_path: str = "rewards.txt"
     loss_log_path: str = "losses.txt"
-
-
 
     def __post_init__(self):
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
@@ -68,16 +68,26 @@ def main():
     envs = VecEnv(make_env, config.num_envs, img_size=config.img_size)
 
     memory = Memory(device)
-    ppo_agent = PPO(action_dim, config.img_size, proprio_dim, config.lr_actor, config.lr_critic,
-                    config.gamma, config.K_epochs, config.eps_clip, device)
+    ppo_agent = PPO(
+        action_dim,
+        config.img_size,
+        proprio_dim,
+        config.lr_actor,
+        config.lr_critic,
+        config.gamma,
+        config.K_epochs,
+        config.eps_clip,
+        device,
+    )
 
     if config.load_checkpoint_path:
         ppo_agent.load(config.load_checkpoint_path)
 
     time_step = 0
 
-
-    num_episodes = int(config.max_training_timesteps // (config.max_ep_len * config.num_envs))
+    num_episodes = int(
+        config.max_training_timesteps // (config.max_ep_len * config.num_envs)
+    )
     with trange(num_episodes, desc="Episodes") as pbar:
         for ep in range(num_episodes):
             states = envs.reset()
@@ -101,7 +111,9 @@ def main():
 
                 # save model checkpoint
                 if time_step % config.save_model_freq == 0:
-                    checkpoint_path = f"{config.checkpoint_dir}/PPO_{config.env_name}_{time_step}.pth"
+                    checkpoint_path = (
+                        f"{config.checkpoint_dir}/PPO_{config.env_name}_{time_step}.pth"
+                    )
                     ppo_agent.save(checkpoint_path)
 
             pbar.update(1)
@@ -111,12 +123,14 @@ def main():
                 f.write(f"{current_ep_reward}\n")
 
             # Log to wandb
-            wandb.log({
-                "episode": ep,
-                "reward": current_ep_reward,
-                "timestep": time_step,
-                "loss": ppo_agent.losses[-1] if ppo_agent.losses else None
-            })
+            wandb.log(
+                {
+                    "episode": ep,
+                    "reward": current_ep_reward,
+                    "timestep": time_step,
+                    "loss": ppo_agent.losses[-1] if ppo_agent.losses else None,
+                }
+            )
 
             pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
 
