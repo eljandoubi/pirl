@@ -28,7 +28,7 @@ class TrainingConfig:
     lr_critic: float = 3e-4
 
     img_size: int = 64  # Image size for CNN input
-    num_envs: int = 10  # Number of parallel environments
+    num_envs: int = 8  # Number of parallel environments
 
     # --- Checkpointing ---
     save_model_freq: int = int(2e4)  # Save model every n timesteps
@@ -155,6 +155,7 @@ class PPO:
         # For logging losses
         self.mse_losses = []
         self.entropy_losses = []
+        self.surrogate_losses = []
 
     @torch.no_grad()
     def select_action(self, state):
@@ -199,6 +200,7 @@ class PPO:
         # Optimize policy for K epochs
         epoch_mse_losses = []
         epoch_entropy_losses = []
+        epoch_surrogate_losses = []
         eps_clip = self.config.eps_clip
         for _ in tqdm(range(self.config.K_epochs), desc="PPO Update Epochs"):
             # Evaluating old actions and values
@@ -224,10 +226,11 @@ class PPO:
             surr2 = (
                 torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * advantages
             )
-
+            surrgate = -torch.min(surr1, surr2).mean()
+            epoch_surrogate_losses.append(surrgate.item())
             # final loss of clipped objective PPO
             loss = (
-                -torch.min(surr1, surr2).mean()
+                surrgate
                 + 0.5 * mse_loss
                 - 0.01 * dist_entropy
             )
@@ -243,8 +246,10 @@ class PPO:
         # Log average loss for this update
         avg_mse_loss = np.mean(epoch_mse_losses)
         avg_entropy_loss = np.mean(epoch_entropy_losses)
+        avg_surrogate_loss = np.mean(epoch_surrogate_losses)
         self.mse_losses.append(avg_mse_loss)
         self.entropy_losses.append(avg_entropy_loss)
+        self.surrogate_losses.append(avg_surrogate_loss)
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())

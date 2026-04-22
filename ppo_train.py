@@ -85,6 +85,8 @@ def main():
                 log_payload["mse_loss"] = ppo_agent.mse_losses[-1]
             if ppo_agent.entropy_losses:
                 log_payload["entropy_loss"] = ppo_agent.entropy_losses[-1]
+            if ppo_agent.surrogate_losses:
+                log_payload["surrogate_loss"] = ppo_agent.surrogate_losses[-1]
             
             wandb.log(
                 log_payload, step=time_step
