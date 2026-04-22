@@ -8,14 +8,18 @@ from model import ActorCritic
 # --- 3. PPO Agent ---
 class PPO:
     def __init__(
-        self, action_dim, img_size, proprio_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, device
+        self, action_dim, img_size, proprio_dim, lr_actor, lr_critic, gamma,
+        K_epochs, eps_clip, device, fixed_policy_variance
+
     ):
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.device = device
+        
 
-        self.policy = ActorCritic(action_dim, img_size, proprio_dim).to(device)
+        self.policy = ActorCritic(action_dim, img_size, proprio_dim,
+                                  fixed_policy_variance=fixed_policy_variance).to(device)
         self.optimizer = torch.optim.Adam(
             [
                 {"params": self.policy.actor.parameters(), "lr": lr_actor},
@@ -23,11 +27,11 @@ class PPO:
             ]
         )
 
-        self.policy_old = ActorCritic(action_dim, img_size, proprio_dim).to(device)
+        self.policy_old = ActorCritic(action_dim, img_size, proprio_dim,
+                                      fixed_policy_variance=fixed_policy_variance).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
-        self.action_var = torch.full((action_dim,), 0.5**2).to(device)
 
         # For logging losses
         self.losses = []
@@ -52,8 +56,8 @@ class PPO:
                 "robot0_proprio-state": proprio,
             }
 
-            action_mean, _ = self.policy_old(obs)
-            cov_mat = torch.diag(self.action_var).unsqueeze(0)
+            action_mean, action_var, _ = self.policy_old(obs)
+            cov_mat = torch.diag(action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
 
             action = dist.sample()
@@ -90,8 +94,8 @@ class PPO:
         epoch_losses = []
         for _ in range(self.K_epochs):
             # Evaluating old actions and values
-            action_mean, state_values = self.policy(old_obs)
-            cov_mat = torch.diag(self.action_var)
+            action_mean, action_var, state_values = self.policy(old_obs)
+            cov_mat = torch.diag(action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
 
             logprobs = dist.log_prob(old_actions)

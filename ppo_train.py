@@ -47,6 +47,8 @@ class TrainingConfig:
     reward_log_path: str = "rewards.txt"
     loss_log_path: str = "losses.txt"
 
+    fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
+
     def __post_init__(self):
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
         Path(self.log_dir).mkdir(parents=True, exist_ok=True)
@@ -98,7 +100,7 @@ def main():
             for t in range(1, config.max_ep_len + 1):
                 # select action with policy
                 action, log_prob = ppo_agent.select_action(states)
-                next_states, rewards, dones = envs.step(action.numpy())
+                next_states, rewards, dones = envs.step(action.numpy().clip(-1, 1))
                 memory.extend(action, states, log_prob, rewards, dones)
                 states = next_states
                 time_step += 1

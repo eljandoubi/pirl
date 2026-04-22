@@ -4,9 +4,10 @@ import torch.nn as nn
 
 # --- 2. Multi-Modal Actor-Critic Network ---
 class ActorCritic(nn.Module):
-    def __init__(self, action_dim, img_size=64, proprio_dim=50):
+    def __init__(self, action_dim, img_size=64, proprio_dim=50,
+                 fixed_policy_variance=True):
         super(ActorCritic, self).__init__()
-
+        self.fixed_policy_variance = fixed_policy_variance
         # Image processing network (CNN) for RGB
         self.image_conv = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=8, stride=4),
@@ -50,10 +51,12 @@ class ActorCritic(nn.Module):
         self.fusion_layer = nn.Sequential(nn.Linear(fused_size, 512), nn.ReLU())
 
         # Actor head
-        self.actor = nn.Sequential(
-            nn.Linear(512, action_dim),
-            nn.Tanh(),  # To scale actions to [-1, 1]
-        )
+        if fixed_policy_variance:
+            action_var = torch.full((action_dim,), 0.5**2, device=self.device)
+            self.register_buffer("action_var", action_var)
+            self.actor =nn.Linear(512, action_dim)
+        else:
+            self.actor = nn.Linear(512, action_dim * 2)  # Output both mean and log variance
 
         # Critic head
         self.critic = nn.Linear(512, 1)
@@ -86,6 +89,18 @@ class ActorCritic(nn.Module):
         fused_output = self.fusion_layer(fused_features)
 
         action_mean = self.actor(fused_output)
+        if self.fixed_policy_variance:
+            action_var = self.action_var.expand_as(action_mean)
+        else:
+            action_mean, action_logvar = action_mean.chunk(2, dim=-1)
+            action_logvar = torch.clamp(action_logvar, -20, 2)  # Clamp log variance for stability
+            action_var = torch.exp(action_logvar)
         state_value = self.critic(fused_output)
 
-        return action_mean, state_value
+        return action_mean, action_var, state_value
+
+
+if __name__ == "__main__":
+    x = torch.randn(5, 8)  # Batch of 2 RGB images
+    x,y = x.chunk(2, dim=-1)
+    print(x.shape, y.shape)
