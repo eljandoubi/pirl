@@ -58,7 +58,8 @@ def main():
         num_episodes = int(
             config.max_training_timesteps // config.update_timestep
         )+1
-        with trange(num_episodes, desc="Episodes") as pbar:
+        max_iterations = num_episodes * config.update_timestep
+        with trange(max_iterations, desc="Episodes") as pbar:
             for ep in range(num_episodes):
                 obs = env.reset()
                 current_ep_reward = 0
@@ -88,7 +89,7 @@ def main():
                         )
                         ppo_agent.save(checkpoint_path)
 
-                pbar.update(1)
+                    pbar.update(1)
 
                 # Log to wandb
                 log_payload = {

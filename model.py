@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 
 
-# --- 2. Multi-Modal Actor-Critic Network ---
 class ActorCritic(nn.Module):
     def __init__(self, action_dim, img_size=64, proprio_dim=50,
                  fixed_policy_variance=True):

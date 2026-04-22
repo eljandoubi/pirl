@@ -44,6 +44,7 @@ class RolloutBuffer:
         self.logprobs[t] = logprobs
 
         self.ptr += 1
+        assert self.ptr <= self.T, f"Buffer overflow: ptr {self.ptr} exceeds T {self.T}"
 
     @torch.no_grad()
     def compute_gae(self, last_value:torch.Tensor, gamma:float=0.99, lam:float=0.95):

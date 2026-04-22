@@ -29,7 +29,7 @@ class TrainingConfig:
     lr_critic: float = 3e-4
 
     img_size: int = 64  # Image size for CNN input
-    num_envs: int = 8  # Number of parallel environments
+    num_envs: int = 16  # Number of parallel environments
 
     # --- Checkpointing ---
     save_model_freq: int = int(2e4)  # Save model every n timesteps
