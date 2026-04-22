@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.multiprocessing as mp
-import wandb
 from dotenv import load_dotenv
 from tqdm import trange
 
+import wandb
 from ppo import PPO, Memory
 from robotenv import VecEnv, make_env
 
@@ -83,6 +83,7 @@ def main():
         config.K_epochs,
         config.eps_clip,
         device,
+        config.fixed_policy_variance,
     )
 
     if config.load_checkpoint_path:

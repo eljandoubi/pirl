@@ -11,3 +11,5 @@ wheels/
 *.txt
 *.pth
 .env
+wandb/
+*.log

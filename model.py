@@ -98,9 +98,3 @@ class ActorCritic(nn.Module):
         state_value = self.critic(fused_output)
 
         return action_mean, action_var, state_value
-
-
-if __name__ == "__main__":
-    x = torch.randn(5, 8)  # Batch of 2 RGB images
-    x,y = x.chunk(2, dim=-1)
-    print(x.shape, y.shape)
