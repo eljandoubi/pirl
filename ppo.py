@@ -110,7 +110,7 @@ class PPO:
 
 
     def update(self, buffer: RolloutBuffer, last_obs: dict[str, torch.Tensor]):
-
+        last_obs = self.obs_to_device(last_obs, self.device)
         with torch.no_grad():
             last_value = self.policy(last_obs)[2].squeeze()
 

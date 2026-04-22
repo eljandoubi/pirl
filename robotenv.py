@@ -1,9 +1,11 @@
 import os
 
+import torch
+
 os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
+
 import numpy as np
 import robosuite as suite
-import torch
 import torch.multiprocessing as mp
 
 
@@ -26,101 +28,88 @@ def make_env(device_id=-1, img_size=64, max_episode_steps=200):
     return env
 
 
-def filter_state(state:dict[str, np.ndarray], keys:list[str])->dict[str, np.ndarray]:
+def filter_state(state:dict[str, np.ndarray], keys:list[str])->dict[str, torch.Tensor]:
     return {
-        k: state[k] for k in keys
+        k: torch.as_tensor(state[k], dtype=torch.float32) for k in keys
     }
 
+def stack_obs(obs_list:list[dict[str, torch.Tensor]])->dict[str, torch.Tensor]:
+    stacked_obs = {}
+    for k in obs_list[0].keys():
+        stacked_obs[k] = torch.stack([obs[k] for obs in obs_list], dim=0)
+    return stacked_obs
 
-def worker(i, buffer, env_fn, env_kwargs, filter_keys):
+
+
+def worker(remote, env_fn, env_kwargs, filter_keys):
 
     env = env_fn(**env_kwargs)
-    obs = filter_state(env.reset(), filter_keys)
 
     while True:
-        buffer.ready[i] = 0
+        cmd, data = remote.recv()
 
-        action = buffer.actions[i].numpy().clip(-1, 1)
-        obs_raw, reward, done, _ = env.step(action)
+        if cmd == "step":
+            action = data
+            obs_raw, reward, done, _ = env.step(action)
 
-        if done:
+            if done:
+                obs_raw = env.reset()
+
+            obs = filter_state(obs_raw, filter_keys)
+
+            remote.send((obs, reward, done))
+
+        elif cmd == "reset":
             obs_raw = env.reset()
+            obs = filter_state(obs_raw, filter_keys)
+            remote.send(obs)
 
-        obs = filter_state(obs_raw, filter_keys)
+        elif cmd == "close":
+            env.close()
+            remote.close()
+            break
 
-        for k in buffer.obs:
-            buffer.obs[k][i].copy_(torch.as_tensor(obs[k]))
+class SubprocVecEnv:
+    def __init__(self, env_fn, num_envs, env_kwargs, filter_keys):
+        self.num_envs = num_envs
+        self.filter_keys = filter_keys
 
-        buffer.rewards[i] = reward
-        buffer.dones[i] = float(done)
+        self.remotes, self.work_remotes = zip(*[
+            mp.Pipe() for _ in range(num_envs)
+        ])
 
-        buffer.ready[i] = 1
-
-class SharedBuffer:
-    def __init__(self, N, obs_shapes, action_dim):
-        self.N = N
-
-        self.obs = {
-            k: torch.zeros((N, *shape), dtype=torch.float32).share_memory_()
-            for k, shape in obs_shapes.items()
-        }
-
-        self.rewards = torch.zeros(N, dtype=torch.float32).share_memory_()
-        self.dones = torch.zeros(N, dtype=torch.bool).share_memory_()
-        self.actions = torch.zeros((N, action_dim), dtype=torch.float32).share_memory_()
-
-        self.ready = torch.zeros(N, dtype=torch.int32).share_memory_()
-        self.closed = torch.zeros(N, dtype=torch.int32).share_memory_()
-
-
-class SharedVecEnv:
-    def __init__(self, env_fn, num_envs, obs_shapes, action_dim, filter_keys, **env_kwargs):
-        self.N = num_envs
-        self.buffer = SharedBuffer(num_envs, obs_shapes, action_dim)
-
-        self.ps = []
-        for i in range(num_envs):
-            p = mp.Process(
+        self.ps = [
+            mp.Process(
                 target=worker,
-                args=(i, self.buffer, env_fn, env_kwargs, filter_keys),
+                args=(work_remote, env_fn, env_kwargs, filter_keys),
             )
+            for work_remote in self.work_remotes
+        ]
+
+        for p in self.ps:
             p.daemon = True
             p.start()
-            self.ps.append(p)
 
     def reset(self):
-        # wait until first observations are ready
-        while self.buffer.ready.sum().item() < self.N:
-            pass
-        self.buffer.ready.zero_()
+        for r in self.remotes:
+            r.send(("reset", None))
 
-        return {k: v.clone() for k, v in self.buffer.obs.items()}
+        obs = [r.recv() for r in self.remotes]
+        return stack_obs(obs)
 
     def step(self, actions):
-        # torch.cuda.synchronize() if torch.cuda.is_available() else None
-        self.buffer.actions.copy_(actions)
+        for r, a in zip(self.remotes, actions):
+            r.send(("step", a))
 
-        while self.buffer.ready.sum().item() < self.N:
-            pass
-        self.buffer.ready.zero_()
+        results = [r.recv() for r in self.remotes]
+        
+        obs, rewards, dones = zip(*results)
+        return stack_obs(obs), rewards, dones
 
-        obs = {k: v.clone() for k, v in self.buffer.obs.items()}
-        rewards = self.buffer.rewards.clone()
-        dones = self.buffer.dones.clone()
-
-        return obs, rewards, dones
-    
 
     def close(self):
-        # signal all workers to stop
-        self.buffer.closed.fill_(1)
+        for r in self.remotes:
+            r.send(("close", None))
 
-        # wait for processes to exit
         for p in self.ps:
-            p.join(timeout=5)
-
-        # force kill if stuck
-        for p in self.ps:
-            if p.is_alive():
-                print("⚠️ Forcing worker termination")
-                p.terminate()
+            p.join()

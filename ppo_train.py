@@ -4,13 +4,14 @@ mp.set_start_method("spawn", force=True)
 
 import gc  # noqa: E402
 
+import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 from tqdm import trange  # noqa: E402
 
 import wandb  # noqa: E402
 from ppo import PPO, TrainingConfig  # noqa: E402
-from robotenv import SharedVecEnv, make_env  # noqa: E402
+from robotenv import SubprocVecEnv, make_env  # noqa: E402
 from rollout import RolloutBuffer  # noqa: E402
 
 print("Loading environment variables...", load_dotenv())
@@ -22,7 +23,7 @@ def main():
         config = TrainingConfig()
         run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
         config.update_path(run.id)
-
+        
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         _env = make_env(img_size=config.img_size)
         action_dim = _env.action_dim
@@ -30,15 +31,15 @@ def main():
         obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
         _env.close()
         del _env
+
+        env_kwargs = dict(img_size=config.img_size,
+        max_episode_steps=config.max_ep_len,)
     
-        env = SharedVecEnv(
+        env = SubprocVecEnv(
         make_env,
         num_envs=config.num_envs,
-        obs_shapes=obs_shapes,
-        action_dim=action_dim,
+        env_kwargs=env_kwargs,
         filter_keys=keys,
-        img_size=config.img_size,
-        max_episode_steps=config.max_ep_len,
     )
 
 
@@ -59,20 +60,21 @@ def main():
         num_episodes = int(
             config.max_training_timesteps // config.update_timestep
         )+1
-        max_iterations = num_episodes * config.update_timestep
-        with trange(max_iterations, desc="Episodes") as pbar:
+        
+        with trange(num_episodes, desc="Episodes") as pbar:
             for ep in range(num_episodes):
                 obs = env.reset()
                 current_ep_reward = 0
                 for t in range(1, config.max_ep_len + 1):
+                    
                     # select action with policy
                     action, log_prob, values, obs = ppo_agent.select_action(obs)
-                    env_actions = action.detach().cpu()
+                    env_actions = action.detach().cpu().numpy().clip(-1, 1)
                     next_obs, rewards, dones = env.step(env_actions)
                     buffer.add(obs, action, rewards, dones, values, log_prob)
                     obs = next_obs
                     time_step += 1
-                    current_ep_reward += torch.mean(rewards)
+                    current_ep_reward += np.mean(rewards)
 
                     # update PPO agent
                     if len(buffer) >= config.update_timestep:
@@ -90,8 +92,8 @@ def main():
                         )
                         ppo_agent.save(checkpoint_path)
 
-                    pbar.update(1)
-                    pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
+                pbar.update(1)
+                pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
 
                 # Log to wandb
                 log_payload = {
@@ -109,9 +111,9 @@ def main():
                     log_payload, step=time_step
                 )
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        exit_code = 1
+    # except Exception as e:
+    #     print(f"An error occurred: {e}")
+    #     exit_code = 1
 
     finally:
 
