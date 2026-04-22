@@ -1,7 +1,6 @@
 import os
 
 os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
-import time
 
 import numpy as np
 import robosuite as suite
@@ -73,6 +72,9 @@ def worker(remote, env_fn, env_kwargs, filter_keys):
         except Exception:
             pass
 
+
+
+
 class SubprocVecEnv:
     def __init__(self, env_fn, num_envs, env_kwargs, filter_keys, timeout=60):
         self.num_envs = num_envs
@@ -81,19 +83,16 @@ class SubprocVecEnv:
         self.filter_keys = filter_keys
         self.timeout = timeout
 
-        self.remotes = []
-        self.work_remotes = []
-        self.ps = []
-        self.last_alive = []
+        self.remotes = [None] * num_envs
+        self.work_remotes = [None] * num_envs
+        self.ps = [None] * num_envs
+        self.last_obs = [None] * num_envs
 
         for i in range(num_envs):
             self._spawn(i)
 
-        self.env_kwargs = env_kwargs
-        self.last_obs = [None] * num_envs
-
     # -------------------------
-    # spawn / respawn worker
+    # spawn (clean slot replace)
     # -------------------------
     def _spawn(self, i):
         parent, child = mp.Pipe()
@@ -105,110 +104,103 @@ class SubprocVecEnv:
         p.daemon = True
         p.start()
 
-        self.remotes.append(parent)
-        self.work_remotes.append(child)
-        self.ps.append(p)
-        self.last_alive.append(time.time())
+        self.remotes[i] = parent
+        self.work_remotes[i] = child
+        self.ps[i] = p
 
-    def _rebuild_worker(self, i):
+        # immediate reset (guarantee valid obs)
         try:
-            self.ps[i].terminate()
+            parent.send(("reset", None))
+            self.last_obs[i] = parent.recv()
         except Exception:
-            pass
-
-        try:
-            self.remotes[i].close()
-        except Exception:
-            pass
-
-        self._spawn(i)
+            self.last_obs[i] = None
 
     # -------------------------
-    # safe send/recv
+    # rebuild (atomic + safe)
+    # -------------------------
+    def _rebuild_worker(self, i):
+        try:
+            if self.ps[i] is not None:
+                self.ps[i].terminate()
+        except Exception:
+            pass
+
+        try:
+            if self.remotes[i] is not None:
+                self.remotes[i].close()
+        except Exception:
+            pass
+
+        # clean replace
+        self._spawn(i)
+
+        return self.last_obs[i]
+
+    # -------------------------
+    # safe recv
     # -------------------------
     def _safe_recv(self, i):
         r = self.remotes[i]
+        p = self.ps[i]
 
-        if not self.ps[i].is_alive():
-            self._rebuild_worker(i)
+        if p is None or not p.is_alive():
             return None
 
         if not r.poll(self.timeout):
-            # hung worker → restart
-            self._rebuild_worker(i)
             return None
 
         try:
             return r.recv()
         except Exception:
-            self._rebuild_worker(i)
             return None
 
     # -------------------------
-    # reset
+    # reset (fixed-size always)
     # -------------------------
     def reset(self):
-        for r in self.remotes:
-            r.send(("reset", None))
-
         obs = []
+
         for i in range(self.num_envs):
-            o = self._safe_recv(i)
-            if o is None:
-                continue
+            try:
+                self.remotes[i].send(("reset", None))
+                o = self.remotes[i].recv()
+                self.last_obs[i] = o
+            except Exception:
+                o = self._rebuild_worker(i)
+
             obs.append(o)
 
         return stack_obs(obs)
 
     # -------------------------
-    # step
+    # step (PATTERN 2 CORRECT)
     # -------------------------
     def step(self, actions):
-        for r, a in zip(self.remotes, actions):
+        # send actions
+        for i, (r, a) in enumerate(zip(self.remotes, actions)):
             try:
                 r.send(("step", a))
             except Exception:
-                # pipe broken → force respawn
-                continue
+                # broken pipe → will rebuild on recv
+                pass
 
         obs, rewards, dones = [], [], []
 
         for i in range(self.num_envs):
-            r = self.remotes[i]
+            result = self._safe_recv(i)
 
-            # worker dead or stuck → hot swap immediately
-            if (not self.ps[i].is_alive()) or (not r.poll(self.timeout)):
-                self._rebuild_worker(i)
-
-                # reset env after respawn
-                self.remotes[i].send(("reset", None))
-                o = self.remotes[i].recv()
-
+            # 🔥 HOT SWAP (single source of truth)
+            if result is None:
+                o = self._rebuild_worker(i)
+                r = 0.0
+                d = True
+            else:
+                o, r, d = result
                 self.last_obs[i] = o
-                obs.append(o)
-                rewards.append(0.0)
-                dones.append(True)
-                continue
 
-            try:
-                o, rwd, done = r.recv()
-            except Exception:
-                # crash during recv → hot swap
-                self._rebuild_worker(i)
-
-                self.remotes[i].send(("reset", None))
-                o = self.remotes[i].recv()
-
-                self.last_obs[i] = o
-                obs.append(o)
-                rewards.append(0.0)
-                dones.append(True)
-                continue
-
-            self.last_obs[i] = o
             obs.append(o)
-            rewards.append(rwd)
-            dones.append(done)
+            rewards.append(r)
+            dones.append(d)
 
         return stack_obs(obs), rewards, dones
 
@@ -224,8 +216,8 @@ class SubprocVecEnv:
 
         for p in self.ps:
             try:
-                p.join(timeout=1)
-                if p.is_alive():
+                if p is not None:
                     p.terminate()
+                    p.join(timeout=1)
             except Exception:
                 pass
