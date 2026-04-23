@@ -75,8 +75,10 @@ def worker(remote, env_fn, env_kwargs, filter_keys):
 
 
 
+
+
 # -------------------------
-# logger setup
+# logger
 # -------------------------
 logger = logging.getLogger("SubprocVecEnv")
 logger.setLevel(logging.INFO)
@@ -88,7 +90,7 @@ if not logger.handlers:
 
 
 class SubprocVecEnv:
-    def __init__(self, env_fn, num_envs, env_kwargs, filter_keys, timeout=10):
+    def __init__(self, env_fn, num_envs, env_kwargs, filter_keys, timeout=30):
         self.num_envs = num_envs
         self.env_fn = env_fn
         self.env_kwargs = env_kwargs
@@ -102,6 +104,22 @@ class SubprocVecEnv:
 
         for i in range(num_envs):
             self._spawn(i)
+
+    # -------------------------
+    # fallback obs (CRITICAL)
+    # -------------------------
+    def _get_fallback_obs(self, i):
+        if self.last_obs[i] is not None:
+            return self.last_obs[i]
+
+        logger.warning(f"[env {i}] trying fallback recovery")
+
+        for _ in range(3):
+            self._spawn(i)
+            if self.last_obs[i] is not None:
+                return self.last_obs[i]
+
+        raise RuntimeError(f"[env {i}] cannot recover valid observation")
 
     # -------------------------
     # spawn worker
@@ -122,6 +140,7 @@ class SubprocVecEnv:
         self.work_remotes[i] = child
         self.ps[i] = p
 
+        # initial reset (safe)
         try:
             parent.send(("reset", None))
             if parent.poll(self.timeout):
@@ -156,7 +175,7 @@ class SubprocVecEnv:
         return self.last_obs[i]
 
     # -------------------------
-    # safe recv
+    # safe recv (NON-BLOCKING)
     # -------------------------
     def _safe_recv(self, i):
         r = self.remotes[i]
@@ -197,6 +216,10 @@ class SubprocVecEnv:
                 logger.warning(f"[env {i}] reset failed → rebuild")
                 o = self._rebuild_worker(i)
 
+            if o is None:
+                logger.error(f"[env {i}] fallback obs used")
+                o = self._get_fallback_obs(i)
+
             self.last_obs[i] = o
             obs.append(o)
 
@@ -221,6 +244,11 @@ class SubprocVecEnv:
             if result is None:
                 logger.warning(f"[env {i}] step failed → hot swap")
                 o = self._rebuild_worker(i)
+
+                if o is None:
+                    logger.error(f"[env {i}] fallback obs used")
+                    o = self._get_fallback_obs(i)
+
                 r = 0.0
                 d = True
             else:

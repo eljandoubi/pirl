@@ -23,7 +23,7 @@ def main():
         run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
         config.set_id(run.id)
         config.update_path()
-        wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "run_id": run.id}, allow_val_change=True)
+        wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "runid": run.id}, allow_val_change=True)
         
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         _env = make_env(img_size=config.img_size)
@@ -86,8 +86,7 @@ def main():
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
 
-                    # save model checkpoint
-                    if time_step % config.save_model_freq == 0:
+                        # save model checkpoint
                         checkpoint_path = (
                             f"{config.checkpoint_dir}/PPO_{config.env_name}_{time_step}.pth"
                         )
@@ -98,7 +97,6 @@ def main():
 
                 # Log to wandb
                 log_payload = {
-                    "episode": ep,
                     "reward": current_ep_reward,
                 }
                 if ppo_agent.mse_losses:
