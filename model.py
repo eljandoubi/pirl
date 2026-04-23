@@ -90,13 +90,14 @@ class ActorCritic(nn.Module):
         fused_output = self.fusion_layer(fused_features)
 
         action_mean = self.actor(fused_output)
+
         if self.fixed_policy_variance:
             action_var = self.action_var.expand_as(action_mean)
         else:
             action_mean, action_logvar = action_mean.chunk(2, dim=-1)
             action_logvar = torch.clamp(action_logvar, -20, 2)  # Clamp log variance for stability
             action_var = torch.exp(action_logvar)
-        action_mean = torch.tanh(action_mean)  # Ensure actions are in the range [-1, 1]
+        
         state_value = self.critic(fused_output)
 
         return action_mean, action_var, state_value

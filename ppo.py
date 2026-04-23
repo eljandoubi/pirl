@@ -78,7 +78,7 @@ class PPO:
         self.obs_shapes = obs_shapes
 
         self.policy = ActorCritic(action_dim, config.img_size, proprio_dim=obs_shapes["robot0_proprio-state"][0],
-                                  fixed_policy_variance=config.fixed_policy_variance).to(device)
+                                  fixed_policy_variance=config.fixed_policy_variance).to(device).train()
         self.optimizer = torch.optim.AdamW(
             [
                 {"params": self.policy.actor.parameters(), "lr": config.lr_actor},
