@@ -1,6 +1,8 @@
 import os
 
 os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
+from pathlib import Path
+
 import cv2
 import numpy as np
 import robosuite as suite
@@ -21,6 +23,9 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 video_path = "robosuite_multi_cam.mp4"
 fps = 20
 checkpoint_path = "ppo_checkpoints/cr58fgkj/PPO_robosuite_lift_109568.pth"
+# checkpoint_path = "ppo_checkpoints/cr58fgkj/PPO_robosuite_lift_125952.pth"
+video_path = checkpoint_path.replace("ppo_checkpoints", "ppo_videos").replace(".pth", ".mp4")
+Path(video_path).parent.mkdir(parents=True, exist_ok=True)
 camera_names = ("frontview", "birdview", "agentview", "sideview")
 keys = ["agentview_image", "agentview_depth", "robot0_proprio-state"]
 action_dim, obs_shapes = get_env_infos(img_size, keys)
@@ -112,17 +117,18 @@ def main():
     frames = []
 
     obs = env.reset()
-
+    cumulative_reward = 0
     for step in tqdm.tqdm(range(max_episode_steps), desc="Collecting frames"):
         action = policy(obs)
         obs, reward, done, info = env.step(action)
+        cumulative_reward += reward
 
         frame = compose_frame(obs)
 
         # add global info
         cv2.putText(
             frame,
-            f"Step: {step}  Reward: {reward:.2f}",
+            f"Step: {step}  Reward: {reward:.2f}  Cumulative: {cumulative_reward:.2f}",
             (10, frame.shape[0] - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
