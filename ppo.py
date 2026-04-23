@@ -27,7 +27,7 @@ class TrainingConfig:
 
     lr_actor: float = 1e-4
     lr_critic: float = 3e-4
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.0005
     mse_coef: float = 0.5
 
     img_size: int = 64  # Image size for CNN input
@@ -38,7 +38,7 @@ class TrainingConfig:
     checkpoint_dir: str = "./ppo_checkpoints"
     load_checkpoint_path: str | None = None
 
-    fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
+    fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
     max_grad_norm: float = 1.  # Max gradient norm for clipping
     runid: str | None = None  # Wandb run ID for resuming runs
 
@@ -87,7 +87,7 @@ class PPO:
         )
 
         self.policy_old = ActorCritic(action_dim, config.img_size,  proprio_dim=obs_shapes["robot0_proprio-state"][0],
-                                      fixed_policy_variance=config.fixed_policy_variance).to(device)
+                                      fixed_policy_variance=config.fixed_policy_variance).to(device).eval()
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
