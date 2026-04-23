@@ -23,7 +23,7 @@ def main():
         run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
         config.set_id(run.id)
         config.update_path()
-        wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "run_id": run.id})
+        wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "run_id": run.id}, allow_val_change=True)
         
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         _env = make_env(img_size=config.img_size)
