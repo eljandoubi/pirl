@@ -1,8 +1,8 @@
 import torch.multiprocessing as mp
 
 mp.set_start_method("spawn", force=True)
-
 import gc  # noqa: E402
+import os  # noqa: E402
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -32,10 +32,13 @@ def main():
         obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
         _env.close()
         del _env
-
-        env_kwargs = dict(img_size=config.img_size,
-        max_episode_steps=config.max_ep_len,)
-    
+        print("MUJOCO_GL:", os.getenv("MUJOCO_GL"))
+        env_kwargs = dict(
+            device_id=device.index if os.getenv("MUJOCO_GL") == "egl" else -1,
+            img_size=config.img_size,
+            max_episode_steps=config.max_ep_len,
+        )
+        print("Creating vectorized environment with the following kwargs:", env_kwargs)
         env = SubprocVecEnv(
         make_env,
         num_envs=config.num_envs,
