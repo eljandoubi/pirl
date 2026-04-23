@@ -16,6 +16,13 @@ from rollout import RolloutBuffer  # noqa: E402
 
 print("Loading environment variables...", load_dotenv())
 
+def get_env_infos(img_size, keys):
+        _env = make_env(img_size)
+        action_dim = _env.action_dim
+        obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
+        _env.close()
+        return action_dim, obs_shapes
+
 def main():
     exit_code = 0
     try:
@@ -26,12 +33,9 @@ def main():
         wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "runid": run.id}, allow_val_change=True)
         
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        _env = make_env(img_size=config.img_size)
-        action_dim = _env.action_dim
         keys = ["agentview_image", "agentview_depth", "robot0_proprio-state"]
-        obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
-        _env.close()
-        del _env
+        action_dim, obs_shapes = get_env_infos(config.img_size, keys)
+ 
         print("MUJOCO_GL:", os.getenv("MUJOCO_GL"))
         env_kwargs = dict(
             device_id=device.index if os.getenv("MUJOCO_GL") == "egl" else -1,

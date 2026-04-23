@@ -13,3 +13,4 @@ wheels/
 .env
 wandb/
 *.log
+*.mp4
