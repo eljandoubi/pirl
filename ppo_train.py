@@ -21,7 +21,9 @@ def main():
     try:
         config = TrainingConfig()
         run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
-        config.update_path(run.id)
+        config.set_id(run.id)
+        config.update_path()
+        wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "run_id": run.id})
         
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         _env = make_env(img_size=config.img_size)
@@ -110,9 +112,9 @@ def main():
                     log_payload, step=time_step
                 )
 
-    # except Exception as e:
-    #     print(f"An error occurred: {e}")
-    #     exit_code = 1
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        exit_code = 1
 
     finally:
 

@@ -1,6 +1,7 @@
 import os
 
 os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
+import logging
 
 import numpy as np
 import robosuite as suite
@@ -74,9 +75,20 @@ def worker(remote, env_fn, env_kwargs, filter_keys):
 
 
 
+# -------------------------
+# logger setup
+# -------------------------
+logger = logging.getLogger("SubprocVecEnv")
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    ch = logging.StreamHandler()
+    ch.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    logger.addHandler(ch)
+
 
 class SubprocVecEnv:
-    def __init__(self, env_fn, num_envs, env_kwargs, filter_keys, timeout=60):
+    def __init__(self, env_fn, num_envs, env_kwargs, filter_keys, timeout=10):
         self.num_envs = num_envs
         self.env_fn = env_fn
         self.env_kwargs = env_kwargs
@@ -92,9 +104,11 @@ class SubprocVecEnv:
             self._spawn(i)
 
     # -------------------------
-    # spawn (clean slot replace)
+    # spawn worker
     # -------------------------
     def _spawn(self, i):
+        logger.info(f"[env {i}] spawning worker")
+
         parent, child = mp.Pipe()
 
         p = mp.Process(
@@ -108,32 +122,37 @@ class SubprocVecEnv:
         self.work_remotes[i] = child
         self.ps[i] = p
 
-        # immediate reset (guarantee valid obs)
         try:
             parent.send(("reset", None))
-            self.last_obs[i] = parent.recv()
-        except Exception:
+            if parent.poll(self.timeout):
+                self.last_obs[i] = parent.recv()
+                logger.info(f"[env {i}] spawn + reset OK")
+            else:
+                logger.warning(f"[env {i}] spawn reset timeout")
+                self.last_obs[i] = None
+        except Exception as e:
+            logger.error(f"[env {i}] spawn failed: {e}")
             self.last_obs[i] = None
 
     # -------------------------
-    # rebuild (atomic + safe)
+    # rebuild worker
     # -------------------------
     def _rebuild_worker(self, i):
+        logger.warning(f"[env {i}] rebuilding worker")
+
         try:
             if self.ps[i] is not None:
                 self.ps[i].terminate()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[env {i}] terminate failed: {e}")
 
         try:
             if self.remotes[i] is not None:
                 self.remotes[i].close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[env {i}] close pipe failed: {e}")
 
-        # clean replace
         self._spawn(i)
-
         return self.last_obs[i]
 
     # -------------------------
@@ -144,53 +163,63 @@ class SubprocVecEnv:
         p = self.ps[i]
 
         if p is None or not p.is_alive():
+            logger.warning(f"[env {i}] process dead")
             return None
 
         if not r.poll(self.timeout):
+            logger.warning(f"[env {i}] recv timeout ({self.timeout}s)")
             return None
 
         try:
             return r.recv()
-        except Exception:
+        except Exception as e:
+            logger.error(f"[env {i}] recv failed: {e}")
             return None
 
     # -------------------------
-    # reset (fixed-size always)
+    # reset
     # -------------------------
     def reset(self):
+        logger.info("resetting all envs")
+
         obs = []
 
         for i in range(self.num_envs):
             try:
                 self.remotes[i].send(("reset", None))
-                o = self.remotes[i].recv()
-                self.last_obs[i] = o
-            except Exception:
+            except Exception as e:
+                logger.error(f"[env {i}] reset send failed: {e}")
+
+        for i in range(self.num_envs):
+            o = self._safe_recv(i)
+
+            if o is None:
+                logger.warning(f"[env {i}] reset failed → rebuild")
                 o = self._rebuild_worker(i)
 
+            self.last_obs[i] = o
             obs.append(o)
 
         return stack_obs(obs)
 
     # -------------------------
-    # step (PATTERN 2 CORRECT)
+    # step
     # -------------------------
     def step(self, actions):
         # send actions
         for i, (r, a) in enumerate(zip(self.remotes, actions)):
             try:
                 r.send(("step", a))
-            except Exception:
-                # broken pipe → will rebuild on recv
-                pass
+            except Exception as e:
+                logger.error(f"[env {i}] step send failed: {e}")
 
         obs, rewards, dones = [], [], []
 
         for i in range(self.num_envs):
             result = self._safe_recv(i)
 
-            # 🔥 HOT SWAP (single source of truth)
             if result is None:
+                logger.warning(f"[env {i}] step failed → hot swap")
                 o = self._rebuild_worker(i)
                 r = 0.0
                 d = True
@@ -208,16 +237,18 @@ class SubprocVecEnv:
     # close
     # -------------------------
     def close(self):
-        for r in self.remotes:
+        logger.info("closing all envs")
+
+        for i, r in enumerate(self.remotes):
             try:
                 r.send(("close", None))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[env {i}] close send failed: {e}")
 
-        for p in self.ps:
+        for i, p in enumerate(self.ps):
             try:
                 if p is not None:
                     p.terminate()
                     p.join(timeout=1)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[env {i}] terminate failed: {e}")

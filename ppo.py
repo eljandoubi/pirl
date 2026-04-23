@@ -27,9 +27,11 @@ class TrainingConfig:
 
     lr_actor: float = 1e-4
     lr_critic: float = 3e-4
+    entropy_coef: float = 0.01
+    mse_coef: float = 0.5
 
     img_size: int = 64  # Image size for CNN input
-    num_envs: int = 16  # Number of parallel environments
+    num_envs: int = 8  # Number of parallel environments
 
     # --- Checkpointing ---
     save_model_freq: int = int(2e4)  # Save model every n timesteps
@@ -55,9 +57,14 @@ class TrainingConfig:
         if self.load_checkpoint_path is not None:
             assert os.path.isfile(self.load_checkpoint_path), f"Checkpoint path {self.load_checkpoint_path} does not exist"
 
-    def update_path(self, folder_name: str):
+    def update_path(self, folder_name: str | None = None):
+        if folder_name is None:
+            folder_name = self.runid if self.runid is not None else "default_run"
         self.checkpoint_dir = os.path.join(self.checkpoint_dir, folder_name)
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+
+    def set_id(self, runid: str):
+        self.runid = runid
 
 
 class PPO:
@@ -155,8 +162,8 @@ class PPO:
             # final loss of clipped objective PPO
             loss = (
                 surrgate
-                + 0.5 * mse_loss
-                - 0.01 * dist_entropy
+                + self.config.mse_coef * mse_loss
+                - self.config.entropy_coef * dist_entropy
             )
 
             # take gradient step
