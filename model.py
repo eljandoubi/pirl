@@ -68,10 +68,10 @@ class ActorCritic(nn.Module):
 
     def forward(self, obs):
 
-        img = (obs["agentview_image"]-128.) / 128.0  # Normalize to [-1, 1]
+        img = (obs["robot0_eye_in_hand_image"]-128.) / 128.0  # Normalize to [-1, 1]
         img = img.permute(0, 3, 1, 2).contiguous()  # Change to (batch, channel, height, width)
         
-        depth = (obs["agentview_depth"]-0.5) / 0.5  # Normalize to [-1, 1]
+        depth = (obs["robot0_eye_in_hand_depth"]-0.5) / 0.5  # Normalize to [-1, 1]
         depth = depth.permute(0, 3, 1, 2).contiguous()
 
         proprio = obs["robot0_proprio-state"]

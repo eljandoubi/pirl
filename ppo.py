@@ -15,7 +15,7 @@ from rollout import RolloutBuffer
 @dataclass
 class TrainingConfig:
     env_name: str = "robosuite_lift"
-    max_ep_len: int = 1024  # max timesteps in one episode
+    max_ep_len: int = 256  # max timesteps in one episode
     max_training_timesteps: int = (
         1000000  # break training loop if timeteps > max_training_timesteps
     )
@@ -30,10 +30,11 @@ class TrainingConfig:
     entropy_coef: float = 0.0005
     mse_coef: float = 0.5
     action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
-    fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
+    fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
     max_grad_norm: float = 1.  # Max gradient norm for clipping
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
+    reward_shaping: bool = True
 
     # --- Checkpointing ---
     checkpoint_dir: str = "./ppo_checkpoints"

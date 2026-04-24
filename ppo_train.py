@@ -33,7 +33,7 @@ def main():
         wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "runid": run.id}, allow_val_change=True)
         
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        keys = ["agentview_image", "agentview_depth", "robot0_proprio-state"]
+        keys = ["robot0_eye_in_hand_image", "robot0_eye_in_hand_depth", "robot0_proprio-state"]
         action_dim, obs_shapes = get_env_infos(config.img_size, keys)
  
         print("MUJOCO_GL:", os.getenv("MUJOCO_GL"))
@@ -41,6 +41,7 @@ def main():
             device_id=device.index if os.getenv("MUJOCO_GL") == "egl" else -1,
             img_size=config.img_size,
             max_episode_steps=config.max_ep_len,
+            reward_shaping=config.reward_shaping,
         )
         print("Creating vectorized environment with the following kwargs:", env_kwargs)
         env = SubprocVecEnv(

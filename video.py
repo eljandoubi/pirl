@@ -22,12 +22,18 @@ device_id = 0 if torch.cuda.is_available() else -1
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 video_path = "robosuite_multi_cam.mp4"
 fps = 20
-checkpoint_path = "ppo_checkpoints/cr58fgkj/PPO_robosuite_lift_109568.pth"
-# checkpoint_path = "ppo_checkpoints/cr58fgkj/PPO_robosuite_lift_125952.pth"
+checkpoint_path = "./ppo_checkpoints/2ohq34qz/PPO_robosuite_lift_98304.pth"
 video_path = checkpoint_path.replace("ppo_checkpoints", "ppo_videos").replace(".pth", ".mp4")
 Path(video_path).parent.mkdir(parents=True, exist_ok=True)
-camera_names = ("frontview", "birdview", "agentview", "sideview")
-keys = ["agentview_image", "agentview_depth", "robot0_proprio-state"]
+camera_names = (
+    "frontview",
+    "birdview",
+    "agentview",
+    "sideview",
+    "robot0_robotview",
+    "robot0_eye_in_hand",
+)
+keys = ["robot0_eye_in_hand_image", "robot0_eye_in_hand_depth", "robot0_proprio-state"]
 action_dim, obs_shapes = get_env_infos(img_size, keys)
 agent =  PPO(action_dim, device, obs_shapes, config)
 agent.load(checkpoint_path)
@@ -86,12 +92,26 @@ def add_label(img, text):
         cv2.LINE_AA,
     )
 
-def process_image(img, name):
-    # flip (robosuite images are upside down)
+def process_image(img, name, target_size=256):
     img = np.flipud(img)
 
-    # add label
+    # highlight robot cameras
+    if "robot0" in name:
+        img = cv2.copyMakeBorder(
+            img, 4, 4, 4, 4,
+            cv2.BORDER_CONSTANT,
+            value=(0, 255, 255)  # yellow border
+        )
+
     img = add_label(img, name)
+
+    # FORCE same size for all cameras
+    img = cv2.resize(
+        img,
+        (target_size, target_size),
+        interpolation=cv2.INTER_LINEAR
+    )
+
 
     return img
 
@@ -103,10 +123,12 @@ def compose_frame(obs):
         img = process_image(img, cam)
         images.append(img)
 
-    # 2x2 grid
-    top = np.concatenate(images[:2], axis=1)
-    bottom = np.concatenate(images[2:], axis=1)
-    frame = np.concatenate([top, bottom], axis=0)
+    # layout: 3 rows × 2 columns
+    row1 = np.concatenate(images[0:2], axis=1)  # front | bird
+    row2 = np.concatenate(images[2:4], axis=1)  # agent | side
+    row3 = np.concatenate(images[4:6], axis=1)  # robotview | eye_in_hand
+
+    frame = np.concatenate([row1, row2, row3], axis=0)
 
     return frame
 
