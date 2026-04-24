@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class ActorCritic(nn.Module):
     def __init__(self, action_dim, img_size=64, proprio_dim=50,
-                 fixed_policy_variance=True):
+                 fixed_policy_variance=True, action_std=0.5):
         super(ActorCritic, self).__init__()
         self.fixed_policy_variance = fixed_policy_variance
         # Image processing network (CNN) for RGB
@@ -57,7 +57,7 @@ class ActorCritic(nn.Module):
 
         # Actor head
         if fixed_policy_variance:
-            action_var = torch.full((action_dim,), 0.5**2)
+            action_var = torch.full((action_dim,), action_std**2)
             self.register_buffer("action_var", action_var)
             self.actor = nn.Linear(512, action_dim)
         else:

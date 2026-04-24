@@ -29,6 +29,7 @@ class TrainingConfig:
     lr_critic: float = 3e-4
     entropy_coef: float = 0.0005
     mse_coef: float = 0.5
+    action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
 
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
@@ -78,7 +79,8 @@ class PPO:
         self.obs_shapes = obs_shapes
 
         self.policy = ActorCritic(action_dim, config.img_size, proprio_dim=obs_shapes["robot0_proprio-state"][0],
-                                  fixed_policy_variance=config.fixed_policy_variance).to(device).train()
+                                  fixed_policy_variance=config.fixed_policy_variance, action_std=config.action_std
+                                  ).to(device).train()
         self.optimizer = torch.optim.AdamW(
             [
                 {"params": self.policy.actor.parameters(), "lr": config.lr_actor},
@@ -87,7 +89,8 @@ class PPO:
         )
 
         self.policy_old = ActorCritic(action_dim, config.img_size,  proprio_dim=obs_shapes["robot0_proprio-state"][0],
-                                      fixed_policy_variance=config.fixed_policy_variance).to(device).eval()
+                                      fixed_policy_variance=config.fixed_policy_variance, action_std=config.action_std
+                                      ).to(device).eval()
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
