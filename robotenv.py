@@ -16,7 +16,7 @@ def make_env(device_id=-1, img_size=64, max_episode_steps=200, reward_shaping=Tr
         use_camera_obs=True,
         has_renderer=False, 
         has_offscreen_renderer=True,
-        camera_names="agentview",
+        camera_names="robot0_eye_in_hand",
         camera_heights=img_size,
         camera_widths=img_size,
         camera_depths=True,

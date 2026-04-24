@@ -22,7 +22,8 @@ device_id = 0 if torch.cuda.is_available() else -1
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 video_path = "robosuite_multi_cam.mp4"
 fps = 20
-checkpoint_path = "./ppo_checkpoints/2ohq34qz/PPO_robosuite_lift_98304.pth"
+# checkpoint_path = "./ppo_checkpoints/2ohq34qz/PPO_robosuite_lift_98304.pth"
+checkpoint_path = "./ppo_checkpoints/t8dbutb9/PPO_robosuite_lift_122112.pth"
 video_path = checkpoint_path.replace("ppo_checkpoints", "ppo_videos").replace(".pth", ".mp4")
 Path(video_path).parent.mkdir(parents=True, exist_ok=True)
 camera_names = (
@@ -43,7 +44,7 @@ agent.load(checkpoint_path)
 def to_torch(obs):
     result = {}
     for k in obs_shapes.keys():
-        if "agentview" in k:
+        if "robot0_eye_in_hand" in k:
             obs[k] = cv2.resize(obs[k], (img_size, img_size), interpolation=cv2.INTER_NEAREST)
             if "depth" in k:
                 obs[k] = obs[k][..., None]  # add channel dim for depth images
