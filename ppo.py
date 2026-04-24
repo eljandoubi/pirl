@@ -30,17 +30,15 @@ class TrainingConfig:
     entropy_coef: float = 0.0005
     mse_coef: float = 0.5
     action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
-
+    fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
+    max_grad_norm: float = 1.  # Max gradient norm for clipping
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
 
     # --- Checkpointing ---
-    save_model_freq: int = int(2e4)  # Save model every n timesteps
     checkpoint_dir: str = "./ppo_checkpoints"
     load_checkpoint_path: str | None = None
 
-    fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
-    max_grad_norm: float = 1.  # Max gradient norm for clipping
     runid: str | None = None  # Wandb run ID for resuming runs
 
     def __post_init__(self):
@@ -54,9 +52,11 @@ class TrainingConfig:
         assert self.K_epochs > 0, "K_epochs must be positive"
         assert self.max_ep_len > 0, "max_ep_len must be positive"
         assert self.num_envs > 0, "num_envs must be positive"
-        assert self.save_model_freq > 0, "save_model_freq must be positive"
         if self.load_checkpoint_path is not None:
             assert os.path.isfile(self.load_checkpoint_path), f"Checkpoint path {self.load_checkpoint_path} does not exist"
+        if self.fixed_policy_variance:
+            assert self.action_std > 0, "Action standard deviation must be positive when using fixed policy variance"
+            assert self.action_std <= 1, "Action standard deviation should be less than 1 for stable training"
 
     def update_path(self, folder_name: str | None = None):
         if folder_name is None:
