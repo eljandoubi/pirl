@@ -258,7 +258,8 @@ class SubprocVecEnv:
             obs.append(o)
             rewards.append(r)
             dones.append(d)
-
+        rewards = torch.as_tensor(rewards, dtype=torch.float32)
+        dones = torch.as_tensor(dones, dtype=torch.float32)
         return stack_obs(obs), rewards, dones
 
     # -------------------------

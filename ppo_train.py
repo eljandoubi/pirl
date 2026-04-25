@@ -3,7 +3,6 @@ import torch.multiprocessing as mp
 mp.set_start_method("spawn", force=True)
 import os  # noqa: E402
 
-import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 from tqdm import trange  # noqa: E402
@@ -82,7 +81,7 @@ def main():
                     buffer.add(obs, action, rewards, dones, values, log_prob)
                     obs = next_obs
                     time_step += 1
-                    current_ep_reward += np.mean(rewards)
+                    current_ep_reward += torch.mean(rewards).item()
 
                     # update PPO agent
                     if len(buffer) >= config.update_timestep:
