@@ -35,22 +35,23 @@ class RolloutBuffer:
         t = self.ptr
 
         for k in self.obs:
-            self.obs[k][t] = torch.as_tensor(obs[k], device=self.device, dtype=torch.float32)
+            self.obs[k][t] = obs[k].to(self.device, non_blocking=True)
 
-        self.actions[t] = actions
-        self.rewards[t] = torch.as_tensor(rewards, device=self.device, dtype=torch.float32)
-        self.dones[t] = torch.as_tensor(dones, device=self.device, dtype=torch.float32)
-        self.values[t] = values.squeeze(1)
-        self.logprobs[t] = logprobs
+        self.actions[t] = actions.detach()
+        self.rewards[t] = rewards.to(self.device, non_blocking=True)
+        self.dones[t] = dones.to(self.device, non_blocking=True)
+        self.values[t] = values.detach().squeeze(1)
+        self.logprobs[t] = logprobs.detach()
 
         self.ptr += 1
         assert self.ptr <= self.T, f"Buffer overflow: ptr {self.ptr} exceeds T {self.T}"
 
     @torch.no_grad()
     def compute_gae(self, last_value:torch.Tensor, gamma:float=0.99, lam:float=0.95):
+        last_value = last_value.detach()
         adv = torch.zeros_like(self.rewards)
-        gae = torch.zeros(self.N, device=self.device)
-
+        gae = torch.zeros_like(last_value)
+        last_value = last_value * (1.0 - self.dones[-1])
         for t in reversed(range(self.T)):
             next_value = last_value if t == self.T - 1 else self.values[t + 1]
 

@@ -27,7 +27,7 @@ class TrainingConfig:
     shared_lr: float = 5e-5
     lr_actor: float = 1e-4
     lr_critic: float = 2e-4
-    entropy_coef: float = 0.001
+    entropy_coef: float = 0.0001
     mse_coef: float = 0.25
     action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
     fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
@@ -96,8 +96,9 @@ class PPO:
 
         self.policy_old = ActorCritic(action_dim, config.img_size,  proprio_dim=obs_shapes["robot0_proprio-state"][0],
                                       fixed_policy_variance=config.fixed_policy_variance, action_std=config.action_std
-                                      ).to(device).eval()
+                                      ).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
+        self.policy_old.eval()
 
         self.MseLoss = nn.MSELoss()
 
@@ -193,6 +194,7 @@ class PPO:
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
+        self.policy_old.eval()
 
     def save(self, checkpoint_path: str):
         torch.save(
@@ -209,4 +211,5 @@ class PPO:
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.policy_old.load_state_dict(self.policy.state_dict())
+        self.policy_old.eval()
         print(f"Checkpoint loaded from {checkpoint_path}")

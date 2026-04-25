@@ -1,7 +1,6 @@
 import torch.multiprocessing as mp
 
 mp.set_start_method("spawn", force=True)
-import gc  # noqa: E402
 import os  # noqa: E402
 
 import numpy as np  # noqa: E402
@@ -90,9 +89,6 @@ def main():
                         assert len(buffer) == config.update_timestep, f"Buffer length {len(buffer)} does not match expected {config.update_timestep}"
                         ppo_agent.update(buffer, next_obs)
                         buffer.reset()
-                        gc.collect()
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
 
                         # save model checkpoint
                         checkpoint_path = (

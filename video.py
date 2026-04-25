@@ -23,7 +23,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 video_path = "robosuite_multi_cam.mp4"
 fps = 20
 # checkpoint_path = "./ppo_checkpoints/2ohq34qz/PPO_robosuite_lift_98304.pth"
-checkpoint_path = "./ppo_checkpoints/t8dbutb9/PPO_robosuite_lift_122112.pth"
+# checkpoint_path = "./ppo_checkpoints/t8dbutb9/PPO_robosuite_lift_122112.pth"
+checkpoint_path = "./ppo_checkpoints/r0cf6loy/PPO_robosuite_lift_123904.pth"
 video_path = checkpoint_path.replace("ppo_checkpoints", "ppo_videos").replace(".pth", ".mp4")
 Path(video_path).parent.mkdir(parents=True, exist_ok=True)
 camera_names = (
