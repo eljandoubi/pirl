@@ -47,6 +47,7 @@ class TrainingConfig:
         self.update_timestep = self.max_ep_len * self.num_envs  # Number of timesteps to collect before each PPO update
         assert self.lr_actor > 0, "Learning rate for actor must be positive"
         assert self.lr_critic > 0, "Learning rate for critic must be positive"
+        assert self.shared_lr > 0, "Shared learning rate must be positive"
         assert self.gamma > 0 and self.gamma <= 1, "Gamma must be in (0, 1]"
         assert self.lam >= 0 and self.lam <= 1, "Lambda must be in [0, 1]"
         assert self.eps_clip > 0, "Epsilon clip must be positive"
@@ -209,6 +210,7 @@ class PPO:
     def load(self, checkpoint_path: str):
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
+        self.policy.train()
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.policy_old.eval()
