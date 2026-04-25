@@ -9,17 +9,11 @@ from tqdm import trange  # noqa: E402
 
 import wandb  # noqa: E402
 from ppo import PPO, TrainingConfig  # noqa: E402
-from robotenv import SubprocVecEnv, make_env  # noqa: E402
+from robotenv import SubprocVecEnv, get_env_infos, make_env  # noqa: E402
 from rollout import RolloutBuffer  # noqa: E402
+from video import video_render  # noqa: E402
 
 print("Loading environment variables...", load_dotenv())
-
-def get_env_infos(img_size, keys):
-        _env = make_env(img_size)
-        action_dim = _env.action_dim
-        obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
-        _env.close()
-        return action_dim, obs_shapes
 
 def main():
     exit_code = 0
@@ -29,7 +23,7 @@ def main():
         config.set_id(run.id)
         config.update_path()
         wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "runid": run.id}, allow_val_change=True)
-        
+        checkpoint_best_path = f"{config.checkpoint_dir}/PPO_{config.env_name}_best.pth"
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         keys = ["robot0_eye_in_hand_image", "robot0_eye_in_hand_depth", "robot0_proprio-state"]
         action_dim, obs_shapes = get_env_infos(config.img_size, keys)
@@ -67,7 +61,7 @@ def main():
         num_episodes = int(
             config.max_training_timesteps // config.update_timestep
         )+1
-        
+        best_reward = float("-inf")
         with trange(num_episodes, desc="Episodes") as pbar:
             for ep in range(num_episodes):
                 obs = env.reset()
@@ -83,17 +77,24 @@ def main():
                     time_step += 1
                     current_ep_reward += torch.mean(rewards).item()
 
-                    # update PPO agent
-                    if len(buffer) >= config.update_timestep:
-                        assert len(buffer) == config.update_timestep, f"Buffer length {len(buffer)} does not match expected {config.update_timestep}"
-                        ppo_agent.update(buffer, next_obs)
-                        buffer.reset()
+                if current_ep_reward > best_reward:
+                    best_reward = current_ep_reward
+                    print(f"New best reward: {best_reward:.2f} at episode {ep}")
+                    # save model checkpoint            
+                    ppo_agent.save(checkpoint_best_path)
 
-                        # save model checkpoint
-                        checkpoint_path = (
-                            f"{config.checkpoint_dir}/PPO_{config.env_name}_{time_step}.pth"
-                        )
-                        ppo_agent.save(checkpoint_path)
+
+                # update PPO agent
+                if len(buffer) >= config.update_timestep:
+                    assert len(buffer) == config.update_timestep, f"Buffer length {len(buffer)} does not match expected {config.update_timestep}"
+                    ppo_agent.update(buffer, next_obs)
+                    buffer.reset()
+
+                    # save model checkpoint
+                    checkpoint_path = (
+                        f"{config.checkpoint_dir}/PPO_{config.env_name}_{time_step}.pth"
+                    )
+                    ppo_agent.save(checkpoint_path)
 
                 pbar.update(1)
                 pbar.set_postfix({"Timestep": time_step, "Reward": current_ep_reward})
@@ -121,6 +122,11 @@ def main():
 
         wandb.finish(exit_code=exit_code)
         env.close()
+
+    try:
+        video_render(config)
+    except Exception as e:
+        print(f"An error occurred during video rendering: {e}")
 
 
 if __name__ == "__main__":

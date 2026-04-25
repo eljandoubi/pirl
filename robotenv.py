@@ -27,6 +27,13 @@ def make_env(device_id=-1, img_size=64, max_episode_steps=200, reward_shaping=Tr
     )
     return env
 
+def get_env_infos(img_size, keys):
+        _env = make_env(img_size)
+        action_dim = _env.action_dim
+        obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
+        _env.close()
+        return action_dim, obs_shapes
+
 
 def filter_state(state:dict[str, np.ndarray], keys:list[str])->dict[str, torch.Tensor]:
     return {

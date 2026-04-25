@@ -10,132 +10,115 @@ import torch
 import tqdm
 
 from ppo import PPO, TrainingConfig
-from ppo_train import get_env_infos
-
-# =========================
-# Config
-# =========================
-config = TrainingConfig()
-img_size = config.img_size
-max_episode_steps = config.max_ep_len
-device_id = 0 if torch.cuda.is_available() else -1
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-video_path = "robosuite_multi_cam.mp4"
-fps = 20
-# checkpoint_path = "./ppo_checkpoints/2ohq34qz/PPO_robosuite_lift_98304.pth"
-# checkpoint_path = "./ppo_checkpoints/t8dbutb9/PPO_robosuite_lift_122112.pth"
-# checkpoint_path = "./ppo_checkpoints/r0cf6loy/PPO_robosuite_lift_123904.pth"
-checkpoint_path = "./ppo_checkpoints/c0xjhvxd/PPO_robosuite_lift_118272.pth"
-video_path = checkpoint_path.replace("ppo_checkpoints", "ppo_videos").replace(".pth", ".mp4")
-Path(video_path).parent.mkdir(parents=True, exist_ok=True)
-camera_names = (
-    "frontview",
-    "birdview",
-    "agentview",
-    "sideview",
-    "robot0_robotview",
-    "robot0_eye_in_hand",
-)
-keys = ["robot0_eye_in_hand_image", "robot0_eye_in_hand_depth", "robot0_proprio-state"]
-action_dim, obs_shapes = get_env_infos(img_size, keys)
-agent =  PPO(action_dim, device, obs_shapes, config)
-agent.load(checkpoint_path)
-# =========================
-# Agent policy 
-# =========================
-def to_torch(obs):
-    result = {}
-    for k in obs_shapes.keys():
-        if "robot0_eye_in_hand" in k:
-            obs[k] = cv2.resize(obs[k], (img_size, img_size), interpolation=cv2.INTER_NEAREST)
-            if "depth" in k:
-                obs[k] = obs[k][..., None]  # add channel dim for depth images
+from robotenv import get_env_infos
 
 
-        result[k] = torch.as_tensor(obs[k], device=device, dtype=torch.float32).unsqueeze(0)
-    return result
+def video_render(config = TrainingConfig()):
 
-@torch.inference_mode()
-def policy(obs):
-    action, *_ = agent.select_action(to_torch(obs))
-    action = action.squeeze(0).cpu().numpy()
-    return action.clip(-1, 1)
+    # =========================
+    # Config
+    # =========================
 
-# =========================
-# Create environment
-# =========================
-env = suite.make(
-    "Lift",
-    robots="Panda",
-    use_camera_obs=True,
-    has_renderer=False,
-    has_offscreen_renderer=True,
-    camera_names=camera_names,
-    camera_heights=img_size*4,
-    camera_widths=img_size*4,
-    reward_shaping=True,
-    control_freq=20,
-    horizon=max_episode_steps,
-    render_gpu_device_id=device_id,
-    camera_depths=True,
-)
+    img_size = config.img_size
+    max_episode_steps = config.max_ep_len
+    device_id = 0 if torch.cuda.is_available() else -1
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    fps = 20
+    checkpoint_best_path = f"{config.checkpoint_dir}/PPO_{config.env_name}_best.pth"
+    video_path = checkpoint_best_path.replace("ppo_checkpoints", "ppo_videos").replace(".pth", ".mp4")
+    Path(video_path).parent.mkdir(parents=True, exist_ok=True)
+    camera_names = (
+        "frontview",
+        "birdview",
+        "agentview",
+        "sideview",
+        "robot0_robotview",
+        "robot0_eye_in_hand",
+    )
+    keys = ["robot0_eye_in_hand_image", "robot0_eye_in_hand_depth", "robot0_proprio-state"]
+    action_dim, obs_shapes = get_env_infos(img_size, keys)
+    agent =  PPO(action_dim, device, obs_shapes, config)
+    agent.load(checkpoint_best_path)
+    # =========================
+    # Agent policy 
+    # =========================
+    def to_torch(obs):
+        result = {}
+        for k in obs_shapes.keys():
+            if "robot0_eye_in_hand" in k:
+                obs[k] = cv2.resize(obs[k], (img_size, img_size), interpolation=cv2.INTER_NEAREST)
+                if "depth" in k:
+                    obs[k] = obs[k][..., None]  # add channel dim for depth images
 
-# =========================
-# Helpers
-# =========================
-def add_label(img, text):
-    return cv2.putText(
-        img.copy(),
-        text,
-        (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 0, 255),
-        2,
-        cv2.LINE_AA,
+
+            result[k] = torch.as_tensor(obs[k], device=device, dtype=torch.float32).unsqueeze(0)
+        return result
+
+    @torch.inference_mode()
+    def policy(obs):
+        action, *_ = agent.select_action(to_torch(obs))
+        action = action.squeeze(0).cpu().numpy()
+        return action.clip(-1, 1)
+
+    # =========================
+    # Create environment
+    # =========================
+    env = suite.make(
+        "Lift",
+        robots="Panda",
+        use_camera_obs=True,
+        has_renderer=False,
+        has_offscreen_renderer=True,
+        camera_names=camera_names,
+        camera_heights=img_size*4,
+        camera_widths=img_size*4,
+        reward_shaping=True,
+        control_freq=20,
+        horizon=max_episode_steps,
+        render_gpu_device_id=device_id,
+        camera_depths=True,
     )
 
-def process_image(img, name, target_size=256):
-    img = np.flipud(img)
-
-    # highlight robot cameras
-    if "robot0" in name:
-        img = cv2.copyMakeBorder(
-            img, 4, 4, 4, 4,
-            cv2.BORDER_CONSTANT,
-            value=(0, 255, 255)  # yellow border
+    # =========================
+    # Helpers
+    # =========================
+    def add_label(img, text):
+        return cv2.putText(
+            img.copy(),
+            text,
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (127, 0, 127),
+            2,
+            cv2.LINE_AA,
         )
 
-    img = add_label(img, name)
+    def process_image(img, name):
+        img = np.flipud(img)
 
-    # FORCE same size for all cameras
-    img = cv2.resize(
-        img,
-        (target_size, target_size),
-        interpolation=cv2.INTER_LINEAR
-    )
+        img = add_label(img, name)
+
+        return img
+
+    def compose_frame(obs):
+        images = []
+
+        for cam in camera_names:
+            img = obs[f"{cam}_image"]
+            img = process_image(img, cam)
+            images.append(img)
+
+        # layout: 3 rows × 2 columns
+        row1 = np.concatenate(images[0:2], axis=1)  # front | bird
+        row2 = np.concatenate(images[2:4], axis=1)  # agent | side
+        row3 = np.concatenate(images[4:6], axis=1)  # robotview | eye_in_hand
+
+        frame = np.concatenate([row1, row2, row3], axis=0)
+
+        return frame
 
 
-    return img
-
-def compose_frame(obs):
-    images = []
-
-    for cam in camera_names:
-        img = obs[f"{cam}_image"]
-        img = process_image(img, cam)
-        images.append(img)
-
-    # layout: 3 rows × 2 columns
-    row1 = np.concatenate(images[0:2], axis=1)  # front | bird
-    row2 = np.concatenate(images[2:4], axis=1)  # agent | side
-    row3 = np.concatenate(images[4:6], axis=1)  # robotview | eye_in_hand
-
-    frame = np.concatenate([row1, row2, row3], axis=0)
-
-    return frame
-
-def main():
     # =========================
     # Run episode + collect frames
     # =========================
@@ -189,6 +172,3 @@ def main():
     video.release()
 
     print(f"✅ Video saved to {video_path}")
-
-if __name__ == "__main__":
-    main()

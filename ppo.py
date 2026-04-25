@@ -34,7 +34,7 @@ class TrainingConfig:
     max_grad_norm: float = 0.5  # Max gradient norm for clipping
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
-    reward_shaping: bool = True
+    reward_shaping: bool = False
 
     # --- Checkpointing ---
     checkpoint_dir: str = "./ppo_checkpoints"
