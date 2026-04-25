@@ -13,8 +13,11 @@ from ppo import PPO, TrainingConfig
 from robotenv import get_env_infos
 
 
-def video_render(config = TrainingConfig()):
+def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = None):
 
+    if runid is not None:
+        config.set_id(runid)
+        config.update_path()
     # =========================
     # Config
     # =========================
@@ -172,3 +175,6 @@ def video_render(config = TrainingConfig()):
     video.release()
 
     print(f"✅ Video saved to {video_path}")
+
+if __name__ == "__main__":
+    video_render(runid="ry679qcm")
