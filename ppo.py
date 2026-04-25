@@ -30,7 +30,7 @@ class TrainingConfig:
     entropy_coef: float = 0.0001
     mse_coef: float = 0.25
     action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
-    fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
+    fixed_policy_variance: bool = True  # Whether to use a fixed variance for the action distribution
     max_grad_norm: float = 0.5  # Max gradient norm for clipping
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
