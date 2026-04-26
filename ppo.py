@@ -20,14 +20,14 @@ class TrainingConfig:
         1000000  # break training loop if timeteps > max_training_timesteps
     )
 
-    K_epochs: int = 100
+    K_epochs: int = 10
     eps_clip: float = 0.2  # clip parameter for PPO
     gamma: float = 0.999  # discount factor
     lam: float = 0.95  # GAE lambda parameter
     shared_lr: float = 5e-5
     lr_actor: float = 1e-4
     lr_critic: float = 2e-4
-    entropy_coef: float = -0.01
+    entropy_coef: float = -0.1
     mse_coef: float = 1.
     action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
     fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
@@ -35,6 +35,7 @@ class TrainingConfig:
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
     reward_shaping: bool = True
+    use_object_obs: bool = False
 
     # --- Checkpointing ---
     checkpoint_dir: str = "./ppo_checkpoints"
@@ -137,7 +138,6 @@ class PPO:
         returns = returns.reshape(-1)
         advantages = advantages.reshape(-1)
 
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         batch = buffer.get()
 
         # Optimize policy for K epochs

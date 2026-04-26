@@ -9,7 +9,12 @@ import torch
 import torch.multiprocessing as mp
 
 
-def make_env(device_id=-1, img_size=64, max_episode_steps=200, reward_shaping=True):
+def make_env(device_id:int=-1, 
+             img_size:int=64, 
+             max_episode_steps:int=200,
+             reward_shaping:bool=True,
+             use_object_obs:bool = False):
+    
     env = suite.make(
         "Lift",
         robots="Panda",
@@ -21,9 +26,9 @@ def make_env(device_id=-1, img_size=64, max_episode_steps=200, reward_shaping=Tr
         camera_widths=img_size,
         camera_depths=True,
         reward_shaping=reward_shaping,
-        control_freq=20,
         horizon=max_episode_steps,
         render_gpu_device_id=device_id,
+        use_object_obs=use_object_obs
     )
     return env
 

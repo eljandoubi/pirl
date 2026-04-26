@@ -34,6 +34,7 @@ def main():
             img_size=config.img_size,
             max_episode_steps=config.max_ep_len,
             reward_shaping=config.reward_shaping,
+            use_object_obs=config.use_object_obs
         )
         print("Creating vectorized environment with the following kwargs:", env_kwargs)
         env = SubprocVecEnv(

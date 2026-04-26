@@ -39,7 +39,8 @@ class ActorCritic(nn.Module):
 
         # Proprioceptive state processing network (MLP)
         self.proprio_mlp = nn.Sequential(
-            nn.LayerNorm(proprio_dim),
+            nn.Linear(proprio_dim, proprio_dim),
+            nn.ReLU(),
             nn.Linear(proprio_dim, 128),
             nn.ReLU(),
             nn.Dropout(0.1),
@@ -75,9 +76,6 @@ class ActorCritic(nn.Module):
         depth = depth.permute(0, 3, 1, 2).contiguous()
 
         proprio = obs["robot0_proprio-state"]
-        # proprio = (proprio - proprio.mean(dim=1, keepdim=True)
-        #            ) / (proprio.std(dim=1, keepdim=True) + 1e-8
-        #                 ).contiguous()
 
         img_features = self.image_conv(img)
         depth_features = self.depth_conv(depth)
