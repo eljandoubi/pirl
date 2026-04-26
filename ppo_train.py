@@ -113,7 +113,7 @@ def main():
                 wandb.log(
                     log_payload, step=time_step
                 )
-
+        video_render(config)
     except Exception as e:
         print(f"An error occurred: {e}")
         exit_code = 1
@@ -122,12 +122,6 @@ def main():
 
         wandb.finish(exit_code=exit_code)
         env.close()
-
-    try:
-        video_render(config)
-    except Exception as e:
-        print(f"An error occurred during video rendering: {e}")
-
 
 if __name__ == "__main__":
     main()
