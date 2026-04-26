@@ -15,60 +15,71 @@ from video import video_render  # noqa: E402
 
 print("Loading environment variables...", load_dotenv())
 
+
 def main():
     exit_code = 0
     try:
         config = TrainingConfig()
-        run = wandb.init(project="ppo-robosuite", config=config.__dict__, id=config.runid, resume="allow")
+        run = wandb.init(
+            project="ppo-robosuite",
+            config=config.__dict__,
+            id=config.runid,
+            resume="allow",
+            # mode="disabled",
+        )
         config.set_id(run.id)
         config.update_path()
-        wandb.config.update({"checkpoint_dir": config.checkpoint_dir, "runid": run.id}, allow_val_change=True)
+        wandb.config.update(
+            {"checkpoint_dir": config.checkpoint_dir, "runid": run.id},
+            allow_val_change=True,
+        )
         checkpoint_best_path = f"{config.checkpoint_dir}/PPO_{config.env_name}_best.pth"
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        keys = ["robot0_eye_in_hand_image", "robot0_eye_in_hand_depth", "robot0_proprio-state"]
-        action_dim, obs_shapes = get_env_infos(config.img_size, keys)
- 
+        keys = [
+            "robot0_eye_in_hand_image",
+            "robot0_eye_in_hand_depth",
+            "robot0_proprio-state",
+        ]
+        if config.use_object_obs:
+            keys.append("object-state")
+        action_dim, obs_shapes = get_env_infos(
+            config.img_size, keys, use_object_obs=config.use_object_obs
+        )
+
         print("MUJOCO_GL:", os.getenv("MUJOCO_GL"))
         env_kwargs = dict(
             device_id=device.index if os.getenv("MUJOCO_GL") == "egl" else -1,
             img_size=config.img_size,
             max_episode_steps=config.max_ep_len,
             reward_shaping=config.reward_shaping,
-            use_object_obs=config.use_object_obs
+            use_object_obs=config.use_object_obs,
         )
         print("Creating vectorized environment with the following kwargs:", env_kwargs)
         env = SubprocVecEnv(
-        make_env,
-        num_envs=config.num_envs,
-        env_kwargs=env_kwargs,
-        filter_keys=keys,
-    )
-
-
-        buffer = RolloutBuffer(config.max_ep_len, config.num_envs, obs_shapes, action_dim, device)
-        print(buffer)
-        ppo_agent = PPO(
-            action_dim,
-            device,
-            obs_shapes,
-            config
+            make_env,
+            num_envs=config.num_envs,
+            env_kwargs=env_kwargs,
+            filter_keys=keys,
         )
+
+        buffer = RolloutBuffer(
+            config.max_ep_len, config.num_envs, obs_shapes, action_dim, device
+        )
+        print(buffer)
+        ppo_agent = PPO(action_dim, device, obs_shapes, config)
 
         if config.load_checkpoint_path:
             ppo_agent.load(config.load_checkpoint_path)
 
         time_step = 0
 
-        num_episodes = int(
-            config.max_training_timesteps // config.update_timestep
-        )+1
+        num_episodes = int(config.max_training_timesteps // config.update_timestep) + 1
         best_reward = float("-inf")
         with trange(num_episodes, desc="Episodes") as pbar:
             for ep in range(num_episodes):
                 obs = env.reset()
                 current_ep_reward = 0
                 for t in range(1, config.max_ep_len + 1):
-                    
                     # select action with policy
                     action, log_prob, values, obs = ppo_agent.select_action(obs)
                     env_actions = action.detach().cpu().numpy().clip(-1, 1)
@@ -81,13 +92,14 @@ def main():
                 if current_ep_reward > best_reward:
                     best_reward = current_ep_reward
                     print(f"New best reward: {best_reward:.2f} at episode {ep}")
-                    # save model checkpoint            
+                    # save model checkpoint
                     ppo_agent.save(checkpoint_best_path)
-
 
                 # update PPO agent
                 if len(buffer) >= config.update_timestep:
-                    assert len(buffer) == config.update_timestep, f"Buffer length {len(buffer)} does not match expected {config.update_timestep}"
+                    assert len(buffer) == config.update_timestep, (
+                        f"Buffer length {len(buffer)} does not match expected {config.update_timestep}"
+                    )
                     ppo_agent.update(buffer, next_obs)
                     buffer.reset()
 
@@ -110,19 +122,20 @@ def main():
                     log_payload["entropy_loss"] = ppo_agent.entropy_losses[-1]
                 if ppo_agent.surrogate_losses:
                     log_payload["surrogate_loss"] = ppo_agent.surrogate_losses[-1]
-                
-                wandb.log(
-                    log_payload, step=time_step
-                )
+                if ppo_agent.obj_pred_losses:
+                    log_payload["obj_pred_loss"] = ppo_agent.obj_pred_losses[-1]
+
+                wandb.log(log_payload, step=time_step)
+
         video_render(config)
     except Exception as e:
         print(f"An error occurred: {e}")
         exit_code = 1
 
     finally:
-
         wandb.finish(exit_code=exit_code)
         env.close()
+
 
 if __name__ == "__main__":
     main()

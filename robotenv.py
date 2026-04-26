@@ -1,6 +1,6 @@
 import os
 
-os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
+os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
 import logging
 
 import numpy as np
@@ -9,17 +9,19 @@ import torch
 import torch.multiprocessing as mp
 
 
-def make_env(device_id:int=-1, 
-             img_size:int=64, 
-             max_episode_steps:int=200,
-             reward_shaping:bool=True,
-             use_object_obs:bool = False):
-    
+def make_env(
+    device_id: int = -1,
+    img_size: int = 64,
+    max_episode_steps: int = 200,
+    reward_shaping: bool = True,
+    use_object_obs: bool = False,
+):
+
     env = suite.make(
         "Lift",
         robots="Panda",
         use_camera_obs=True,
-        has_renderer=False, 
+        has_renderer=False,
         has_offscreen_renderer=True,
         camera_names="robot0_eye_in_hand",
         camera_heights=img_size,
@@ -28,29 +30,30 @@ def make_env(device_id:int=-1,
         reward_shaping=reward_shaping,
         horizon=max_episode_steps,
         render_gpu_device_id=device_id,
-        use_object_obs=use_object_obs
+        use_object_obs=use_object_obs,
     )
     return env
 
-def get_env_infos(img_size, keys):
-        _env = make_env(img_size)
-        action_dim = _env.action_dim
-        obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
-        _env.close()
-        return action_dim, obs_shapes
+
+def get_env_infos(img_size: int, keys: list[str], use_object_obs: bool = False):
+    _env = make_env(img_size=img_size, use_object_obs=use_object_obs)
+    action_dim = _env.action_dim
+    obs_shapes = {k: _env.observation_spec()[k].shape for k in keys}
+    _env.close()
+    return action_dim, obs_shapes
 
 
-def filter_state(state:dict[str, np.ndarray], keys:list[str])->dict[str, torch.Tensor]:
-    return {
-        k: torch.as_tensor(state[k], dtype=torch.float32) for k in keys
-    }
+def filter_state(
+    state: dict[str, np.ndarray], keys: list[str]
+) -> dict[str, torch.Tensor]:
+    return {k: torch.as_tensor(state[k], dtype=torch.float32) for k in keys}
 
-def stack_obs(obs_list:list[dict[str, torch.Tensor]])->dict[str, torch.Tensor]:
+
+def stack_obs(obs_list: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     stacked_obs = {}
     for k in obs_list[0].keys():
         stacked_obs[k] = torch.stack([obs[k] for obs in obs_list], dim=0)
     return stacked_obs
-
 
 
 def worker(remote, env_fn, env_kwargs, filter_keys):
@@ -84,9 +87,6 @@ def worker(remote, env_fn, env_kwargs, filter_keys):
             remote.close()
         except Exception:
             pass
-
-
-
 
 
 # -------------------------
@@ -293,3 +293,18 @@ class SubprocVecEnv:
                     p.join(timeout=1)
             except Exception as e:
                 logger.error(f"[env {i}] terminate failed: {e}")
+
+
+if __name__ == "__main__":
+    env_kwargs = {
+        "device_id": -1,
+        "img_size": 64,
+        "max_episode_steps": 200,
+        "reward_shaping": True,
+        "use_object_obs": True,
+    }
+    env = make_env(**env_kwargs)
+    obs = env.reset()
+    for k, v in obs.items():
+        print(f"{k}: {v.shape}")
+    env.close()

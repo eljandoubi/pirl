@@ -1,6 +1,6 @@
 import os
 
-os.environ["MUJOCO_GL"] = "osmesa" # "egl" #
+os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
 from pathlib import Path
 
 import cv2
@@ -28,7 +28,9 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     fps = 20
     checkpoint_best_path = f"{config.checkpoint_dir}/PPO_{config.env_name}_best.pth"
-    video_path = checkpoint_best_path.replace("ppo_checkpoints", "ppo_videos").replace(".pth", ".mp4")
+    video_path = checkpoint_best_path.replace("ppo_checkpoints", "ppo_videos").replace(
+        ".pth", ".mp4"
+    )
     Path(video_path).parent.mkdir(parents=True, exist_ok=True)
     camera_names = (
         "frontview",
@@ -38,23 +40,31 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
         "robot0_robotview",
         "robot0_eye_in_hand",
     )
-    keys = ["robot0_eye_in_hand_image", "robot0_eye_in_hand_depth", "robot0_proprio-state"]
+    keys = [
+        "robot0_eye_in_hand_image",
+        "robot0_eye_in_hand_depth",
+        "robot0_proprio-state",
+    ]
     action_dim, obs_shapes = get_env_infos(img_size, keys)
-    agent =  PPO(action_dim, device, obs_shapes, config)
+    agent = PPO(action_dim, device, obs_shapes, config)
     agent.load(checkpoint_best_path)
+
     # =========================
-    # Agent policy 
+    # Agent policy
     # =========================
     def to_torch(obs):
         result = {}
         for k in obs_shapes.keys():
             if "robot0_eye_in_hand" in k:
-                obs[k] = cv2.resize(obs[k], (img_size, img_size), interpolation=cv2.INTER_NEAREST)
+                obs[k] = cv2.resize(
+                    obs[k], (img_size, img_size), interpolation=cv2.INTER_NEAREST
+                )
                 if "depth" in k:
                     obs[k] = obs[k][..., None]  # add channel dim for depth images
 
-
-            result[k] = torch.as_tensor(obs[k], device=device, dtype=torch.float32).unsqueeze(0)
+            result[k] = torch.as_tensor(
+                obs[k], device=device, dtype=torch.float32
+            ).unsqueeze(0)
         return result
 
     @torch.inference_mode()
@@ -73,8 +83,8 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
         has_renderer=False,
         has_offscreen_renderer=True,
         camera_names=camera_names,
-        camera_heights=img_size*4,
-        camera_widths=img_size*4,
+        camera_heights=img_size * 4,
+        camera_widths=img_size * 4,
         reward_shaping=True,
         control_freq=20,
         horizon=max_episode_steps,
@@ -120,7 +130,6 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
         frame = np.concatenate([row1, row2, row3], axis=0)
 
         return frame
-
 
     # =========================
     # Run episode + collect frames
@@ -175,6 +184,7 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
     video.release()
 
     print(f"✅ Video saved to {video_path}")
+
 
 if __name__ == "__main__":
     video_render(runid="ry679qcm")

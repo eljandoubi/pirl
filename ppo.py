@@ -27,15 +27,21 @@ class TrainingConfig:
     shared_lr: float = 5e-5
     lr_actor: float = 1e-4
     lr_critic: float = 2e-4
-    entropy_coef: float = -0.05
-    mse_coef: float = 1.
-    action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
-    fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
-    max_grad_norm: float = 1.  # Max gradient norm for clipping
+    lr_predictor: float = 1e-4
+    entropy_coef: float = 0.001
+    mse_coef: float = 1.0
+    obj_pred_coef: float = 0.5
+    action_std: float = (
+        0.5  # Standard deviation for action distribution (if fixed variance)
+    )
+    fixed_policy_variance: bool = (
+        False  # Whether to use a fixed variance for the action distribution
+    )
+    max_grad_norm: float = 1.0  # Max gradient norm for clipping
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
     reward_shaping: bool = True
-    use_object_obs: bool = False
+    use_object_obs: bool = True
 
     # --- Checkpointing ---
     checkpoint_dir: str = "./ppo_checkpoints"
@@ -44,8 +50,10 @@ class TrainingConfig:
     runid: str | None = None  # Wandb run ID for resuming runs
 
     def __post_init__(self):
-        
-        self.update_timestep = self.max_ep_len * self.num_envs  # Number of timesteps to collect before each PPO update
+
+        self.update_timestep = (
+            self.max_ep_len * self.num_envs
+        )  # Number of timesteps to collect before each PPO update
         assert self.lr_actor > 0, "Learning rate for actor must be positive"
         assert self.lr_critic > 0, "Learning rate for critic must be positive"
         assert self.shared_lr > 0, "Shared learning rate must be positive"
@@ -56,10 +64,25 @@ class TrainingConfig:
         assert self.max_ep_len > 0, "max_ep_len must be positive"
         assert self.num_envs > 0, "num_envs must be positive"
         if self.load_checkpoint_path is not None:
-            assert os.path.isfile(self.load_checkpoint_path), f"Checkpoint path {self.load_checkpoint_path} does not exist"
+            assert os.path.isfile(self.load_checkpoint_path), (
+                f"Checkpoint path {self.load_checkpoint_path} does not exist"
+            )
         if self.fixed_policy_variance:
-            assert self.action_std > 0, "Action standard deviation must be positive when using fixed policy variance"
-            assert self.action_std <= 1, "Action standard deviation should be less than 1 for stable training"
+            assert self.action_std > 0, (
+                "Action standard deviation must be positive when using fixed policy variance"
+            )
+            assert self.action_std <= 1, (
+                "Action standard deviation should be less than 1 for stable training"
+            )
+        if self.use_object_obs:
+            assert self.obj_pred_coef >= 0, (
+                "Object prediction loss coefficient must be non-negative"
+            )
+        else:
+            self.obj_pred_coef = 0.0  # Ensure it's zero if not using object obs
+
+        if self.fixed_policy_variance:
+            self.entropy_coef = 0.0  # No entropy loss if variance is fixed
 
     def update_path(self, folder_name: str | None = None):
         if folder_name is None:
@@ -73,32 +96,53 @@ class TrainingConfig:
 
 class PPO:
     def __init__(
-        self, action_dim:int, device:torch.device, 
-        obs_shapes: dict[str,tuple[int,...]], config: TrainingConfig
-
+        self,
+        action_dim: int,
+        device: torch.device,
+        obs_shapes: dict[str, tuple[int, ...]],
+        config: TrainingConfig,
     ):
         self.config = config
         self.device = device
         self.obs_shapes = obs_shapes
+        object_dim = obs_shapes["object-state"][0] if config.use_object_obs else 0
 
-        self.policy = ActorCritic(action_dim, config.img_size, proprio_dim=obs_shapes["robot0_proprio-state"][0],
-                                  fixed_policy_variance=config.fixed_policy_variance, action_std=config.action_std
-                                  ).to(device).train()
-        self.optimizer = torch.optim.AdamW(
-            [
-                {"params": self.policy.image_conv.parameters(), "lr": config.shared_lr},
-                {"params": self.policy.depth_conv.parameters(), "lr": config.shared_lr},
-                {"params": self.policy.proprio_mlp.parameters(), "lr": config.shared_lr},
-                {"params": self.policy.fusion_layer.parameters(), "lr": config.shared_lr},
-
-                {"params": self.policy.actor.parameters(), "lr": config.lr_actor},
-                {"params": self.policy.critic.parameters(), "lr": config.lr_critic},
-            ]
+        self.policy = (
+            ActorCritic(
+                action_dim,
+                config.img_size,
+                proprio_dim=obs_shapes["robot0_proprio-state"][0],
+                fixed_policy_variance=config.fixed_policy_variance,
+                action_std=config.action_std,
+                predict_object_state=config.use_object_obs,
+                object_dim=object_dim,
+            )
+            .to(device)
+            .train()
         )
+        params = [
+            {"params": self.policy.backbone.parameters(), "lr": config.shared_lr},
+            {"params": self.policy.actor.parameters(), "lr": config.lr_actor},
+            {"params": self.policy.critic.parameters(), "lr": config.lr_critic},
+        ]
+        if config.use_object_obs:
+            params.append(
+                {
+                    "params": self.policy.object_predictor.parameters(),
+                    "lr": config.lr_predictor,
+                }
+            )
+        self.optimizer = torch.optim.AdamW(params)
 
-        self.policy_old = ActorCritic(action_dim, config.img_size,  proprio_dim=obs_shapes["robot0_proprio-state"][0],
-                                      fixed_policy_variance=config.fixed_policy_variance, action_std=config.action_std
-                                      ).to(device)
+        self.policy_old = ActorCritic(
+            action_dim,
+            config.img_size,
+            proprio_dim=obs_shapes["robot0_proprio-state"][0],
+            fixed_policy_variance=config.fixed_policy_variance,
+            action_std=config.action_std,
+            predict_object_state=config.use_object_obs,
+            object_dim=object_dim,
+        ).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.policy_old.eval()
 
@@ -108,16 +152,18 @@ class PPO:
         self.mse_losses = []
         self.entropy_losses = []
         self.surrogate_losses = []
-
+        self.obj_pred_losses = []
 
     @staticmethod
-    def obs_to_device(obs: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+    def obs_to_device(
+        obs: dict[str, torch.Tensor], device: torch.device
+    ) -> dict[str, torch.Tensor]:
         return {k: v.to(device, non_blocking=True) for k, v in obs.items()}
 
     @torch.no_grad()
     def select_action(self, obs: dict[str, torch.Tensor]):
         obs = self.obs_to_device(obs, self.device)
-        action_mean, action_var, values = self.policy_old(obs)
+        action_mean, action_var, values, _ = self.policy_old(obs)
         cov_mat = torch.diag_embed(action_var)
         dist = MultivariateNormal(action_mean, cov_mat)
 
@@ -125,16 +171,16 @@ class PPO:
         action_logprob = dist.log_prob(action)
 
         return action, action_logprob, values, obs
-    
-
 
     def update(self, buffer: RolloutBuffer, last_obs: dict[str, torch.Tensor]):
         last_obs = self.obs_to_device(last_obs, self.device)
         with torch.no_grad():
             last_value = self.policy_old(last_obs)[2].squeeze()
 
-        returns, advantages = buffer.compute_gae(last_value, self.config.gamma, self.config.lam)
-        
+        returns, advantages = buffer.compute_gae(
+            last_value, self.config.gamma, self.config.lam
+        )
+
         returns = returns.reshape(-1)
         advantages = advantages.reshape(-1)
 
@@ -142,32 +188,41 @@ class PPO:
 
         # Optimize policy for K epochs
         epoch_mse_losses = []
-        epoch_entropy_losses = []
         epoch_surrogate_losses = []
+        if not self.config.fixed_policy_variance or len(self.entropy_losses) < 1:
+            epoch_entropy_losses = []
+        if self.config.use_object_obs:
+            epoch_obj_pred_losses = []
         eps_clip = self.config.eps_clip
         for _ in tqdm(range(self.config.K_epochs), desc="PPO Update Epochs"):
             # Evaluating old actions and values
-            action_mean, action_var, state_values = self.policy(batch["obs"])
-            
+            action_mean, action_var, state_values, obj_pred = self.policy(batch["obs"])
+
             mse_loss = self.MseLoss(state_values.squeeze(1), returns)
             epoch_mse_losses.append(mse_loss.item())
+
+            if self.config.use_object_obs:
+                obj_pred_loss = self.MseLoss(obj_pred, batch["obs"]["object-state"])
+                epoch_obj_pred_losses.append(obj_pred_loss.item())
+            else:
+                obj_pred_loss = 0.0
 
             cov_mat = torch.diag_embed(action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
 
-            dist_entropy = dist.entropy().mean()
-            epoch_entropy_losses.append(dist_entropy.item())
-
+            if not self.config.fixed_policy_variance or len(self.entropy_losses) < 1:
+                dist_entropy = dist.entropy().mean()
+                epoch_entropy_losses.append(dist_entropy.item())
+            else:
+                dist_entropy = 0.0
 
             logprobs = dist.log_prob(batch["actions"])
             # Finding the ratio (pi_theta / pi_theta__old)
             ratios = torch.exp(logprobs - batch["logprobs"].detach())
             # Finding Surrogate Loss
-            
+
             surr1 = ratios * advantages
-            surr2 = (
-                torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * advantages
-            )
+            surr2 = torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * advantages
             surrgate = -torch.min(surr1, surr2).mean()
             epoch_surrogate_losses.append(surrgate.item())
             # final loss of clipped objective PPO
@@ -175,15 +230,16 @@ class PPO:
                 surrgate
                 + self.config.mse_coef * mse_loss
                 - self.config.entropy_coef * dist_entropy
+                + self.config.obj_pred_coef * obj_pred_loss
             )
 
             # take gradient step
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.config.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                self.policy.parameters(), self.config.max_grad_norm
+            )
             self.optimizer.step()
-
-            
 
         # Log average loss for this update
         avg_mse_loss = np.mean(epoch_mse_losses)
@@ -192,6 +248,9 @@ class PPO:
         self.mse_losses.append(avg_mse_loss)
         self.entropy_losses.append(avg_entropy_loss)
         self.surrogate_losses.append(avg_surrogate_loss)
+        if self.config.use_object_obs:
+            avg_obj_pred_loss = np.mean(epoch_obj_pred_losses)
+            self.obj_pred_losses.append(avg_obj_pred_loss)
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
