@@ -93,7 +93,7 @@ class ActorCritic(nn.Module):
             action_var = self.action_var.expand_as(action_mean)
         else:
             action_mean, action_logvar = action_mean.chunk(2, dim=-1)
-            action_logvar = torch.clamp(action_logvar, -5, 1)  # Clamp log variance for stability
+            action_logvar = torch.clamp(action_logvar, -5, 0)  # Clamp log variance for stability
             action_var = torch.exp(action_logvar)
         
         state_value = self.critic(fused_output)

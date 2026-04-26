@@ -27,7 +27,7 @@ class TrainingConfig:
     shared_lr: float = 5e-5
     lr_actor: float = 1e-4
     lr_critic: float = 2e-4
-    entropy_coef: float = -0.1
+    entropy_coef: float = -0.05
     mse_coef: float = 1.
     action_std: float = 0.5  # Standard deviation for action distribution (if fixed variance)
     fixed_policy_variance: bool = False  # Whether to use a fixed variance for the action distribution
