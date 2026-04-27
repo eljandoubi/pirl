@@ -243,11 +243,13 @@ class PPO:
 
         # Log average loss for this update
         avg_mse_loss = np.mean(epoch_mse_losses)
-        avg_entropy_loss = np.mean(epoch_entropy_losses)
+        
         avg_surrogate_loss = np.mean(epoch_surrogate_losses)
         self.mse_losses.append(avg_mse_loss)
-        self.entropy_losses.append(avg_entropy_loss)
         self.surrogate_losses.append(avg_surrogate_loss)
+        if not self.config.fixed_policy_variance or len(self.entropy_losses) < 1:
+            avg_entropy_loss = np.mean(epoch_entropy_losses)
+            self.entropy_losses.append(avg_entropy_loss)
         if self.config.use_object_obs:
             avg_obj_pred_loss = np.mean(epoch_obj_pred_losses)
             self.obj_pred_losses.append(avg_obj_pred_loss)
