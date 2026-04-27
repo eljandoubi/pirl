@@ -1,6 +1,6 @@
-import os
+import os  # noqa
 
-os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
+# os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
 import logging
 
 import numpy as np

@@ -33,7 +33,7 @@ class Backbone(nn.Module):
             nn.Linear(proprio_dim, embed_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(embed_dim, embed_dim//2),
+            nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
         )
 
@@ -46,7 +46,7 @@ class Backbone(nn.Module):
             depth_feature_size = self.depth_conv(dummy_depth).shape[1]
 
         # Fusion layer
-        fused_size = img_feature_size + depth_feature_size + embed_dim//2
+        fused_size = img_feature_size + depth_feature_size + embed_dim // 2
         self.fusion_layer = nn.Sequential(
             nn.Linear(fused_size, embed_dim),
             nn.ReLU(),

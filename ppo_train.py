@@ -5,6 +5,7 @@ import os  # noqa: E402
 
 import torch  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
+from simple_parsing import ArgumentParser  # noqa : E402
 from tqdm import trange  # noqa: E402
 
 import wandb  # noqa: E402
@@ -16,10 +17,9 @@ from video import video_render  # noqa: E402
 print("Loading environment variables...", load_dotenv())
 
 
-def main():
+def main(config: TrainingConfig = TrainingConfig()):
     exit_code = 0
     try:
-        config = TrainingConfig()
         run = wandb.init(
             project="ppo-robosuite",
             config=config.__dict__,
@@ -127,7 +127,7 @@ def main():
 
                 wandb.log(log_payload, step=time_step)
 
-        video_render(config)
+        video_render(config, agent=ppo_agent)
     except Exception as e:
         print(f"An error occurred: {e}")
         exit_code = 1
@@ -138,4 +138,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = ArgumentParser()
+    parser.add_arguments(TrainingConfig, dest="Training config")
+    args = parser.parse_args()
+    config: TrainingConfig = args.params
+    main(config)

@@ -1,6 +1,6 @@
-import os
+import os  # noqa
 
-os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
+# os.environ["MUJOCO_GL"] = "osmesa"  # "egl" #
 from pathlib import Path
 
 import cv2
@@ -13,7 +13,11 @@ from ppo import PPO, TrainingConfig
 from robotenv import get_env_infos
 
 
-def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = None):
+def video_render(
+    config: TrainingConfig = TrainingConfig(),
+    runid: str | None = None,
+    agent: PPO | None = None,
+):
 
     if runid is not None:
         config.set_id(runid)
@@ -47,12 +51,13 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
         "robot0_proprio-state",
     ]
     if config.use_object_obs:
-            keys.append("object-state")
+        keys.append("object-state")
     action_dim, obs_shapes = get_env_infos(
-            config.img_size, keys, use_object_obs=config.use_object_obs
-        )
-    agent = PPO(action_dim, device, obs_shapes, config)
-    agent.load(checkpoint_best_path)
+        config.img_size, keys, use_object_obs=config.use_object_obs
+    )
+    if agent is None:
+        agent = PPO(action_dim, device, obs_shapes, config)
+        agent.load(checkpoint_best_path)
 
     # =========================
     # Agent policy

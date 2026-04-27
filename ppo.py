@@ -118,7 +118,7 @@ class PPO:
                 action_std=config.action_std,
                 predict_object_state=config.use_object_obs,
                 object_dim=object_dim,
-                embed_dim=config.embed_dim
+                embed_dim=config.embed_dim,
             )
             .to(device)
             .train()
@@ -145,7 +145,7 @@ class PPO:
             action_std=config.action_std,
             predict_object_state=config.use_object_obs,
             object_dim=object_dim,
-            embed_dim=config.embed_dim
+            embed_dim=config.embed_dim,
         ).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.policy_old.eval()
@@ -247,7 +247,7 @@ class PPO:
 
         # Log average loss for this update
         avg_mse_loss = np.mean(epoch_mse_losses)
-        
+
         avg_surrogate_loss = np.mean(epoch_surrogate_losses)
         self.mse_losses.append(avg_mse_loss)
         self.surrogate_losses.append(avg_surrogate_loss)

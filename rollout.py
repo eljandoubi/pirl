@@ -2,8 +2,14 @@ import torch
 
 
 class RolloutBuffer:
-    def __init__(self, T:int, N:int, obs_shapes:dict[str,tuple[int,...]],
-                 action_dim:int, device:torch.device):
+    def __init__(
+        self,
+        T: int,
+        N: int,
+        obs_shapes: dict[str, tuple[int, ...]],
+        action_dim: int,
+        device: torch.device,
+    ):
         """
         T: Number of time steps to store
         N: Number of parallel environments
@@ -30,8 +36,15 @@ class RolloutBuffer:
     def __repr__(self):
         return f"RolloutBuffer(T={self.T}, N={self.N}, ptr={self.ptr}, device={self.device}, obs={self.obs_shapes})"
 
-    def add(self, obs:dict[str, torch.Tensor], actions:torch.Tensor, rewards:torch.Tensor,
-            dones:torch.Tensor, values:torch.Tensor, logprobs:torch.Tensor):
+    def add(
+        self,
+        obs: dict[str, torch.Tensor],
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+        values: torch.Tensor,
+        logprobs: torch.Tensor,
+    ):
         t = self.ptr
 
         for k in self.obs:
@@ -47,7 +60,9 @@ class RolloutBuffer:
         assert self.ptr <= self.T, f"Buffer overflow: ptr {self.ptr} exceeds T {self.T}"
 
     @torch.no_grad()
-    def compute_gae(self, last_value:torch.Tensor, gamma:float=0.99, lam:float=0.95):
+    def compute_gae(
+        self, last_value: torch.Tensor, gamma: float = 0.99, lam: float = 0.95
+    ):
         last_value = last_value.detach()
         adv = torch.zeros_like(self.rewards)
         gae = torch.zeros_like(last_value)
@@ -85,4 +100,4 @@ class RolloutBuffer:
         self.ptr = 0
 
     def __len__(self):
-        return self.ptr*self.N
+        return self.ptr * self.N
