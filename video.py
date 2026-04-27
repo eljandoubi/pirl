@@ -8,20 +8,15 @@ import numpy as np
 import robosuite as suite
 import torch
 import tqdm
-
+from simple_parsing import ArgumentParser
 from ppo import PPO, TrainingConfig
 from robotenv import get_env_infos
 
 
 def video_render(
     config: TrainingConfig = TrainingConfig(),
-    runid: str | None = None,
     agent: PPO | None = None,
 ):
-
-    if runid is not None:
-        config.set_id(runid)
-        config.update_path()
 
     # =========================
     # Config
@@ -197,4 +192,11 @@ def video_render(
 
 
 if __name__ == "__main__":
-    video_render(runid="ae2tlrvb")
+    parser = ArgumentParser()
+    parser.add_arguments(TrainingConfig, dest="Training config")
+    args = parser.parse_args()
+    config: TrainingConfig = args.params
+    assert config.runid is not None, (
+        "Please provide a runid to load the corresponding checkpoint and save the video"
+    )
+    video_render(config)

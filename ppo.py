@@ -29,8 +29,8 @@ class TrainingConfig:
     lr_critic: float = 2e-4
     lr_predictor: float = 1e-4
     entropy_coef: float = 0.001
-    mse_coef: float = 1.0
-    obj_pred_coef: float = 0.5
+    mse_coef: float = 0.5
+    obj_pred_coef: float = 1.0
     action_std: float = (
         0.5  # Standard deviation for action distribution (if fixed variance)
     )
@@ -38,8 +38,8 @@ class TrainingConfig:
         True  # Whether to use a fixed variance for the action distribution
     )
     max_grad_norm: float = 1.0  # Max gradient norm for clipping
-    img_size: int = 64  # Image size for CNN input
-    num_envs: int = 8  # Number of parallel environments
+    img_size: int = 124  # Image size for CNN input
+    num_envs: int = 12  # Number of parallel environments
     embed_dim: int = 1024
     reward_shaping: bool = True
     use_object_obs: bool = True
