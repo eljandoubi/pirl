@@ -38,7 +38,7 @@ class TrainingConfig:
         True  # Whether to use a fixed variance for the action distribution
     )
     max_grad_norm: float = 1.0  # Max gradient norm for clipping
-    img_size: int = 124  # Image size for CNN input
+    img_size: int = 64  # Image size for CNN input
     num_envs: int = 12  # Number of parallel environments
     embed_dim: int = 1024
     reward_shaping: bool = True
