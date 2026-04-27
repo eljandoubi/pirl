@@ -20,9 +20,9 @@ class TrainingConfig:
         1000000  # break training loop if timeteps > max_training_timesteps
     )
 
-    K_epochs: int = 10
+    K_epochs: int = 100
     eps_clip: float = 0.2  # clip parameter for PPO
-    gamma: float = 0.999  # discount factor
+    gamma: float = 0.99  # discount factor
     lam: float = 0.95  # GAE lambda parameter
     shared_lr: float = 5e-5
     lr_actor: float = 1e-4
@@ -35,7 +35,7 @@ class TrainingConfig:
         0.5  # Standard deviation for action distribution (if fixed variance)
     )
     fixed_policy_variance: bool = (
-        False  # Whether to use a fixed variance for the action distribution
+        True  # Whether to use a fixed variance for the action distribution
     )
     max_grad_norm: float = 1.0  # Max gradient norm for clipping
     img_size: int = 64  # Image size for CNN input
