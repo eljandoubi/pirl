@@ -18,7 +18,7 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
     if runid is not None:
         config.set_id(runid)
         config.update_path()
-        
+
     # =========================
     # Config
     # =========================
@@ -192,4 +192,4 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
 
 
 if __name__ == "__main__":
-    video_render(runid="3ghispr0")
+    video_render(runid="ae2tlrvb")

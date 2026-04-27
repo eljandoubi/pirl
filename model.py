@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class Backbone(nn.Module):
-    def __init__(self, img_size=64, proprio_dim=50, embed_dim=512):
+    def __init__(self, img_size=64, proprio_dim=50, embed_dim=1024):
         super(Backbone, self).__init__()
         # Image processing network (CNN) for RGB
         self.image_conv = nn.Sequential(
@@ -29,12 +29,11 @@ class Backbone(nn.Module):
 
         # Proprioceptive state processing network (MLP)
         self.proprio_mlp = nn.Sequential(
-            nn.Linear(proprio_dim, proprio_dim),
-            nn.ReLU(),
-            nn.Linear(proprio_dim, 128),
+            nn.LayerNorm(proprio_dim),
+            nn.Linear(proprio_dim, embed_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(128, 64),
+            nn.Linear(embed_dim, embed_dim//2),
             nn.ReLU(),
         )
 
@@ -47,7 +46,7 @@ class Backbone(nn.Module):
             depth_feature_size = self.depth_conv(dummy_depth).shape[1]
 
         # Fusion layer
-        fused_size = img_feature_size + depth_feature_size + 64
+        fused_size = img_feature_size + depth_feature_size + embed_dim//2
         self.fusion_layer = nn.Sequential(
             nn.Linear(fused_size, embed_dim),
             nn.ReLU(),
@@ -87,7 +86,7 @@ class ActorCritic(nn.Module):
         proprio_dim=50,
         fixed_policy_variance=True,
         action_std=0.5,
-        embed_dim=512,
+        embed_dim=1024,
         object_dim=10,
         predict_object_state=False,
     ):
@@ -124,7 +123,7 @@ class ActorCritic(nn.Module):
         else:
             action_mean, action_logvar = action_mean.chunk(2, dim=-1)
             action_logvar = torch.clamp(
-                action_logvar, -5, -1
+                action_logvar, -5, -0.5
             )  # Clamp log variance for stability
             action_var = torch.exp(action_logvar)
 

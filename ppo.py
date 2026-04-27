@@ -40,6 +40,7 @@ class TrainingConfig:
     max_grad_norm: float = 1.0  # Max gradient norm for clipping
     img_size: int = 64  # Image size for CNN input
     num_envs: int = 8  # Number of parallel environments
+    embed_dim: int = 1024
     reward_shaping: bool = True
     use_object_obs: bool = True
 
@@ -63,6 +64,7 @@ class TrainingConfig:
         assert self.K_epochs > 0, "K_epochs must be positive"
         assert self.max_ep_len > 0, "max_ep_len must be positive"
         assert self.num_envs > 0, "num_envs must be positive"
+        assert self.embed_dim > 0
         if self.load_checkpoint_path is not None:
             assert os.path.isfile(self.load_checkpoint_path), (
                 f"Checkpoint path {self.load_checkpoint_path} does not exist"
@@ -116,6 +118,7 @@ class PPO:
                 action_std=config.action_std,
                 predict_object_state=config.use_object_obs,
                 object_dim=object_dim,
+                embed_dim=config.embed_dim
             )
             .to(device)
             .train()
@@ -142,6 +145,7 @@ class PPO:
             action_std=config.action_std,
             predict_object_state=config.use_object_obs,
             object_dim=object_dim,
+            embed_dim=config.embed_dim
         ).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.policy_old.eval()
