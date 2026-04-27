@@ -17,6 +17,8 @@ def video_render(
     config: TrainingConfig = TrainingConfig(),
     agent: PPO | None = None,
 ):
+    if config.runid is not None:
+        config.update_path()
 
     # =========================
     # Config
@@ -193,9 +195,9 @@ def video_render(
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_arguments(TrainingConfig, dest="Training config")
+    parser.add_arguments(TrainingConfig, dest="training_config")
     args = parser.parse_args()
-    config: TrainingConfig = args.params
+    config = getattr(args, "training_config")
     assert config.runid is not None, (
         "Please provide a runid to load the corresponding checkpoint and save the video"
     )

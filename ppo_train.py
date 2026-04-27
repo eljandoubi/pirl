@@ -139,7 +139,7 @@ def main(config: TrainingConfig = TrainingConfig()):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_arguments(TrainingConfig, dest="Training config")
+    parser.add_arguments(TrainingConfig, dest="training_config")
     args = parser.parse_args()
-    config: TrainingConfig = args.params
+    config = getattr(args, "training_config")
     main(config)
