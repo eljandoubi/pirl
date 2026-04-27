@@ -18,6 +18,7 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
     if runid is not None:
         config.set_id(runid)
         config.update_path()
+        
     # =========================
     # Config
     # =========================
@@ -45,7 +46,11 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
         "robot0_eye_in_hand_depth",
         "robot0_proprio-state",
     ]
-    action_dim, obs_shapes = get_env_infos(img_size, keys)
+    if config.use_object_obs:
+            keys.append("object-state")
+    action_dim, obs_shapes = get_env_infos(
+            config.img_size, keys, use_object_obs=config.use_object_obs
+        )
     agent = PPO(action_dim, device, obs_shapes, config)
     agent.load(checkpoint_best_path)
 
@@ -187,4 +192,4 @@ def video_render(config: TrainingConfig = TrainingConfig(), runid: str | None = 
 
 
 if __name__ == "__main__":
-    video_render(runid="ry679qcm")
+    video_render(runid="3ghispr0")
